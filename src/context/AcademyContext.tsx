@@ -14,12 +14,14 @@ import {
 } from 'firebase/firestore';
 import {
   auth,
-  BOOTSTRAPPED_ADMIN_EMAIL,
   clampStr,
+  consumeRedirectResult,
   db,
   handleFirestoreError,
+  isBootstrappedAdminEmail,
   logoutUser,
   OperationType,
+  parseFirebaseAuthError,
   sanitizeId,
   signInWithGoogle,
 } from '../lib/firebase';
@@ -140,9 +142,7 @@ export const AcademyProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [gateBusy, setGateBusy] = useState(false);
 
   const isBootstrappedAdmin =
-    !!user &&
-    user.emailVerified &&
-    user.email?.toLowerCase() === BOOTSTRAPPED_ADMIN_EMAIL.toLowerCase();
+    !!user && user.emailVerified && isBootstrappedAdminEmail(user.email);
 
   const isAdmin = isBootstrappedAdmin || isDbAdmin;
 
@@ -161,6 +161,8 @@ export const AcademyProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   // 1. Auth Listener & Automatic Profile Provisioning
   useEffect(() => {
+    void consumeRedirectResult();
+
     const unsub = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
       setAuthReady(true);
@@ -175,7 +177,7 @@ export const AcademyProvider: React.FC<{ children: React.ReactNode }> = ({ child
         return;
       }
 
-      if (currentUser.email?.toLowerCase() === BOOTSTRAPPED_ADMIN_EMAIL.toLowerCase()) {
+      if (isBootstrappedAdminEmail(currentUser.email)) {
         setGateVerified(true);
         localStorage.setItem('msnr_yt_verified_v1', 'true');
       }
@@ -207,6 +209,22 @@ export const AcademyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     });
     return () => unsub();
   }, []);
+
+  // Sync browser favicon across all pages if Admin uploads a custom logo
+  useEffect(() => {
+    if (
+      settings.logoUrl &&
+      !settings.logoUrl.includes('logo_9bf96027.JPG') &&
+      typeof document !== 'undefined'
+    ) {
+      const iconLinks = document.querySelectorAll<HTMLLinkElement>(
+        'link[rel="icon"], link[rel="shortcut icon"], link[rel="apple-touch-icon"]'
+      );
+      iconLinks.forEach((link) => {
+        link.href = settings.logoUrl;
+      });
+    }
+  }, [settings.logoUrl]);
 
   // 2. Public Settings & Visitor Statistics Listeners
   useEffect(() => {
@@ -693,7 +711,7 @@ export const AcademyProvider: React.FC<{ children: React.ReactNode }> = ({ child
       if (
         check.status === 'SUBSCRIBED' ||
         check.status === 'UNCONFIGURED' ||
-        signedInUser.email?.toLowerCase() === BOOTSTRAPPED_ADMIN_EMAIL.toLowerCase()
+        isBootstrappedAdminEmail(signedInUser.email)
       ) {
         setGateVerified(true);
         localStorage.setItem('msnr_yt_verified_v1', 'true');
@@ -722,6 +740,16 @@ export const AcademyProvider: React.FC<{ children: React.ReactNode }> = ({ child
       }
 
       return check;
+    } catch (err) {
+      const parsed = parseFirebaseAuthError(err);
+      const errText = parsed.isUnauthorizedDomain
+        ? `${parsed.message} Add "${parsed.hostname}" in Firebase Console → Authentication → Settings → Authorized domains.`
+        : parsed.message;
+      setGateMessage(errText);
+      return {
+        status: 'API_LIMITED',
+        message: errText,
+      };
     } finally {
       setGateBusy(false);
     }

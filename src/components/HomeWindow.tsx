@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { ArrowRight, ExternalLink, Laptop, LogOut, Send, Smartphone, Youtube } from 'lucide-react';
 import { useAcademy } from '../context/AcademyContext';
+import { parseFirebaseAuthError } from '../lib/firebase';
 import { formatTelegramHandle, normalizeTelegramUrl } from '../lib/integrations';
 import { ASSETS, type WindowId } from '../types/academy';
 import { GoogleSignInButton, ResilientImage } from './ResilientImage';
@@ -29,6 +30,25 @@ export const HomeWindow: React.FC<HomeWindowProps> = ({
   } = useAcademy();
 
   const [tilt, setTilt] = useState({ rx: 6, ry: -8 });
+  const [loginBusy, setLoginBusy] = useState(false);
+  const [loginErrMsg, setLoginErrMsg] = useState<string | null>(null);
+
+  const handleMemberSignIn = async () => {
+    setLoginBusy(true);
+    setLoginErrMsg(null);
+    try {
+      await login();
+    } catch (err) {
+      const parsed = parseFirebaseAuthError(err);
+      setLoginErrMsg(
+        parsed.isUnauthorizedDomain
+          ? `${parsed.message} Add "${parsed.hostname}" in Firebase Console → Authentication → Settings → Authorized domains.`
+          : parsed.message
+      );
+    } finally {
+      setLoginBusy(false);
+    }
+  };
 
   const handleStageMove = (e: React.MouseEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -319,7 +339,16 @@ export const HomeWindow: React.FC<HomeWindowProps> = ({
               </button>
             </div>
           ) : (
-            <GoogleSignInButton onClick={() => login()} label="Member Sign In" />
+            <div className="flex flex-col items-start gap-1.5">
+              <GoogleSignInButton
+                onClick={handleMemberSignIn}
+                disabled={loginBusy}
+                label={loginBusy ? 'Signing In...' : 'Member Sign In'}
+              />
+              {loginErrMsg && (
+                <p className="text-[11px] text-[#FF453A] max-w-sm leading-snug">{loginErrMsg}</p>
+              )}
+            </div>
           )}
         </div>
 
@@ -355,7 +384,7 @@ export const HomeWindow: React.FC<HomeWindowProps> = ({
           <a href="./privacy.html" className="hover:text-[#F5F5F7] transition-colors whitespace-nowrap">
             Privacy
           </a>
-          <a href="./admin.html" className="hover:text-[#D4AF37] transition-colors whitespace-nowrap">
+          <a href="#admin" className="hover:text-[#D4AF37] transition-colors whitespace-nowrap">
             Admin
           </a>
         </div>

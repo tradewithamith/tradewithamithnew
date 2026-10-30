@@ -97,7 +97,7 @@ export const AppleTopBar: React.FC<HeaderProps> = ({
         <div className="flex items-center shrink-0">
           {isAdmin ? (
             <a
-              href="./admin.html"
+              href={isStaticPage ? './admin.html' : '#admin'}
               className="px-3.5 py-1.5 text-xs font-semibold rounded-lg bg-[#D4AF37] text-[#09090B] hover:bg-[#E5C76B] transition-colors whitespace-nowrap shrink-0"
             >
               Admin Console

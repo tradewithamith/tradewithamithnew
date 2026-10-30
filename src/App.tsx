@@ -61,6 +61,11 @@ function parseHashWindow(): WindowId | null {
   return VALID_WINDOWS.includes(raw) ? raw : null;
 }
 
+function isHashAdmin(): boolean {
+  if (typeof window === 'undefined') return false;
+  return window.location.hash.replace(/^#/, '').trim().toLowerCase() === 'admin';
+}
+
 interface ErrorBoundaryState {
   hasError: boolean;
   errorMessage: string;
@@ -487,12 +492,28 @@ const WorkspaceShell: React.FC = () => {
 };
 
 export default function App() {
-  const page = useMemo(() => detectInitialPage(), []);
+  const initialPage = useMemo(() => detectInitialPage(), []);
+  const [hashAdminOpen, setHashAdminOpen] = useState<boolean>(() => isHashAdmin());
+
+  useEffect(() => {
+    const syncAdminHash = () => {
+      setHashAdminOpen(isHashAdmin());
+    };
+    window.addEventListener('hashchange', syncAdminHash);
+    return () => window.removeEventListener('hashchange', syncAdminHash);
+  }, []);
+
+  const exitHashAdmin = useCallback(() => {
+    if (typeof window !== 'undefined') {
+      window.history.replaceState(null, '', '#home');
+    }
+    setHashAdminOpen(false);
+  }, []);
 
   return (
     <AcademyErrorBoundary>
       <AcademyProvider>
-        {page === 'admin' ? (
+        {initialPage === 'admin' || hashAdminOpen ? (
           <Suspense
             fallback={
               <div className="min-h-screen bg-[#070709] text-[#A1A1AA] flex items-center justify-center text-xs font-medium">
@@ -500,10 +521,13 @@ export default function App() {
               </div>
             }
           >
-            <AdminDashboard />
+            <AdminDashboard onExitAdmin={initialPage === 'admin' ? undefined : exitHashAdmin} />
           </Suspense>
-        ) : page === 'terms' || page === 'privacy' || page === 'about' || page === 'contact' ? (
-          <StaticInfoPage page={page} />
+        ) : initialPage === 'terms' ||
+          initialPage === 'privacy' ||
+          initialPage === 'about' ||
+          initialPage === 'contact' ? (
+          <StaticInfoPage page={initialPage} />
         ) : (
           <WorkspaceShell />
         )}

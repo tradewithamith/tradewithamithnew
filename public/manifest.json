@@ -1,29 +1,29 @@
 {
-  "id": "/",
+  "id": "./",
   "name": "Trade With Amith — MSNR Academy",
   "short_name": "MSNR Academy",
   "description": "Malaysian Support & Resistance (MSNR) trading education and XAUUSD Gold VIP terminal.",
-  "start_url": "/",
-  "scope": "/",
+  "start_url": "./",
+  "scope": "./",
   "display": "standalone",
   "background_color": "#070709",
   "theme_color": "#070709",
   "orientation": "portrait-primary",
   "icons": [
     {
-      "src": "/pwa-192x192.png",
+      "src": "./pwa-192x192.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/pwa-512x512.png",
+      "src": "./pwa-512x512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/pwa-maskable-512x512.png",
+      "src": "./pwa-maskable-512x512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"
