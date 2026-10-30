@@ -112,7 +112,7 @@ export async function fetchYoutubeSubscriberCount(
   channelId: string,
   fallbackCount: string
 ): Promise<string> {
-  const localCacheKey = 'msnr_last_yt_subs_v2';
+  const localCacheKey = 'msnr_live_yt_subs_v3';
   const cleanId = normalizeYoutubeChannelId(channelId);
   if (!cleanId) {
     return localStorage.getItem(localCacheKey) || fallbackCount;

@@ -66,10 +66,10 @@ import {
 } from '../lib/pdfTools';
 import {
   ASSETS,
+  LEGACY_DEMO_FREE_BOOK_IDS,
+  LEGACY_DEMO_PAID_BOOK_IDS,
   LEGACY_DEMO_SIGNAL_IDS,
-  STARTER_FREE_BOOKS,
-  STARTER_PAID_BOOKS,
-  STARTER_VIDEOS,
+  LEGACY_DEMO_VIDEO_IDS,
   type AcademySettings,
   type AcademyVideo,
   type AppNotification,
@@ -112,7 +112,7 @@ function tsMs(v: unknown): number {
 }
 
 export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitAdmin }) => {
-  const { user, authReady, isAdmin, settings, visitorStats, logout } = useAcademy();
+  const { user, authReady, isAdmin, settings, tradingStats, visitorStats, logout } = useAcademy();
   const [activeTab, setActiveTab] = useState<AdminTab>('overview');
   const [authBusy, setAuthBusy] = useState(false);
   const [authError, setAuthError] = useState<ParsedAuthError | null>(null);
@@ -147,18 +147,18 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
   );
   const [memberSearch, setMemberSearch] = useState('');
 
-  // Signal Form State
+  // Signal Form State (Zero pre-filled sample prices)
   const [editingSignalId, setEditingSignalId] = useState<string | null>(null);
   const [sigDate, setSigDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [sigDirection, setSigDirection] = useState<SignalDirection>('BUY');
   const [sigOrderType, setSigOrderType] = useState<SignalOrderType>('LIMIT');
-  const [sigEntry, setSigEntry] = useState('4140');
-  const [sigTp, setSigTp] = useState('4150');
-  const [sigExtraTp, setSigExtraTp] = useState('4160');
-  const [sigSl, setSigSl] = useState('4128');
+  const [sigEntry, setSigEntry] = useState('');
+  const [sigTp, setSigTp] = useState('');
+  const [sigExtraTp, setSigExtraTp] = useState('');
+  const [sigSl, setSigSl] = useState('');
   const [sigResult, setSigResult] = useState<SignalResult>('ACTIVE');
   const [sigClosedPips, setSigClosedPips] = useState('0');
-  const [sigNote, setSigNote] = useState('Wait for M15 candlestick confirmation before entry.');
+  const [sigNote, setSigNote] = useState('');
   const [closingSignalModal, setClosingSignalModal] = useState<{
     signal: VipSignalPublic;
     pipsInput: string;
@@ -581,75 +581,42 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
     }
   };
 
-  // --- Seed Starter Catalog Into Live Firestore (Videos & PDFs ONLY — NEVER Fake Signals!) ---
-  const handleInitializeStarterData = async () => {
+  // --- Purge Any Previously Seeded Legacy Demo Documents From Firestore ---
+  const legacyDemoCount =
+    pubSignals.filter((s) => LEGACY_DEMO_SIGNAL_IDS.has(s.id)).length +
+    allVideos.filter((v) => LEGACY_DEMO_VIDEO_IDS.has(v.id)).length +
+    allFreeBooks.filter((b) => LEGACY_DEMO_FREE_BOOK_IDS.has(b.id)).length +
+    allPaidBooks.filter((b) => LEGACY_DEMO_PAID_BOOK_IDS.has(b.id)).length;
+
+  const handlePurgeLegacyDemoContent = async () => {
     try {
       const batch = writeBatch(db);
-      const settingsSnap = await getDoc(doc(db, 'settings', 'config'));
-      if (!settingsSnap.exists()) {
-        batch.set(doc(db, 'settings', 'config'), {
-          ...settings,
-          updatedAt: serverTimestamp(),
-        });
+      for (const s of pubSignals) {
+        if (LEGACY_DEMO_SIGNAL_IDS.has(s.id)) {
+          batch.delete(doc(db, 'vipSignalsPublic', s.id));
+          batch.delete(doc(db, 'vipSignalsPrivate', s.id));
+        }
       }
-
-      for (const v of STARTER_VIDEOS) {
-        batch.set(doc(db, 'videos', v.id), {
-          id: v.id,
-          title: v.title,
-          youtubeUrl: v.youtubeUrl,
-          thumbnail: v.thumbnail,
-          description: v.description,
-          date: v.date,
-          status: 'ACTIVE',
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        });
+      for (const v of allVideos) {
+        if (LEGACY_DEMO_VIDEO_IDS.has(v.id)) {
+          batch.delete(doc(db, 'videos', v.id));
+        }
       }
-
-      for (const fb of STARTER_FREE_BOOKS) {
-        const autoCover = (await extractPdfCoverFromUrl(fb.pdfUrl)) || '';
-        batch.set(doc(db, 'freeBooks', fb.id), {
-          id: fb.id,
-          name: fb.name,
-          description: fb.description,
-          coverUrl: clampStr(autoCover || fb.coverUrl, 175000),
-          pdfUrl: fb.pdfUrl,
-          views: fb.views,
-          downloads: fb.downloads,
-          status: 'ACTIVE',
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        });
+      for (const fb of allFreeBooks) {
+        if (LEGACY_DEMO_FREE_BOOK_IDS.has(fb.id)) {
+          batch.delete(doc(db, 'freeBooks', fb.id));
+        }
       }
-
-      for (const pb of STARTER_PAID_BOOKS) {
-        const sampleProtectedUrl =
-          pb.id === 'paid_msnr_playbook'
-            ? '/api/sample-pdf/msnr-masterbook-pro'
-            : '/api/sample-pdf/xauusd-liquidity-atlas';
-        const autoCover = (await extractPdfCoverFromUrl(sampleProtectedUrl)) || pb.coverUrl;
-        batch.set(doc(db, 'paidBooksPublic', pb.id), {
-          id: pb.id,
-          name: pb.name,
-          description: pb.description,
-          coverUrl: clampStr(autoCover, 175000),
-          price: pb.price,
-          status: 'ACTIVE',
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        });
-        batch.set(doc(db, 'paidBooksProtected', pb.id), {
-          id: pb.id,
-          pdfUrl: sampleProtectedUrl,
-          updatedAt: serverTimestamp(),
-        });
+      for (const pb of allPaidBooks) {
+        if (LEGACY_DEMO_PAID_BOOK_IDS.has(pb.id)) {
+          batch.delete(doc(db, 'paidBooksPublic', pb.id));
+          batch.delete(doc(db, 'paidBooksProtected', pb.id));
+        }
       }
-
       await batch.commit();
-      showToast('ok', 'Starter videos and PDFs synced (zero fake signals added).');
+      showToast('ok', 'All legacy demo items have been permanently removed from Firestore.');
     } catch (err) {
-      showToast('err', err instanceof Error ? err.message : 'Initialization failed.');
+      showToast('err', err instanceof Error ? err.message : 'Failed to purge legacy demo items.');
     }
   };
 
@@ -725,6 +692,11 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
 
       await batch.commit();
       setEditingSignalId(null);
+      setSigEntry('');
+      setSigTp('');
+      setSigExtraTp('');
+      setSigSl('');
+      setSigNote('');
       setSigResult('ACTIVE');
       setSigClosedPips('0');
       showToast('ok', editingSignalId ? 'Signal updated.' : 'New XAUUSD VIP signal published.');
@@ -1120,8 +1092,8 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
         logoUrl: clampStr(draftSettings.logoUrl, 500, ASSETS.brandEmblem),
         heroSubtitle: clampStr(draftSettings.heroSubtitle, 300),
         msnrDescription: clampStr(draftSettings.msnrDescription, 1500),
-        winRate: clampStr(draftSettings.winRate, 30, '89.4%'),
-        subscriberCountFallback: clampStr(draftSettings.subscriberCountFallback, 40, '336'),
+        winRate: clampStr(tradingStats.winRateFormatted, 30, '0%'),
+        subscriberCountFallback: clampStr(draftSettings.subscriberCountFallback, 40, ''),
         youtubeChannelId: clampStr(normalizeYoutubeChannelId(draftSettings.youtubeChannelId), 80),
         youtubeChannelUrl: clampStr(draftSettings.youtubeChannelUrl, 300),
         youtubeGateEnabled: Boolean(draftSettings.youtubeGateEnabled),
@@ -1140,7 +1112,7 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
         thirdMethodInstructions: clampStr(draftSettings.thirdMethodInstructions, 800),
         thirdMethodFields: clampStr(draftSettings.thirdMethodFields, 300),
         telegramUrl: clampStr(normalizeTelegramUrl(draftSettings.telegramUrl), 300),
-        contactEmail: clampStr(draftSettings.contactEmail, 200),
+        contactEmail: clampStr(draftSettings.contactEmail, 200, 'tradewithamithyt@gmail.com'),
         instagramUrl: clampStr(draftSettings.instagramUrl, 300),
         sheetsVideosUrl: clampStr(draftSettings.sheetsVideosUrl, 500),
         sheetsFreePdfsUrl: clampStr(draftSettings.sheetsFreePdfsUrl, 500),
@@ -1487,16 +1459,27 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
                 </h1>
               </div>
 
-              <button
-                type="button"
-                onClick={handleInitializeStarterData}
-                className="px-4 py-2.5 rounded-xl bg-[#D4AF37] text-[#09090B] text-xs font-semibold hover:bg-[#E5C76B] transition-colors whitespace-nowrap"
-              >
-                Initialize / Sync Starter Catalog to Firestore
-              </button>
+              {legacyDemoCount > 0 && (
+                <button
+                  type="button"
+                  onClick={handlePurgeLegacyDemoContent}
+                  className="px-4 py-2.5 rounded-xl bg-[#FF453A]/20 hover:bg-[#FF453A]/30 border border-[#FF453A]/40 text-xs font-semibold text-[#FF453A] transition-colors whitespace-nowrap"
+                >
+                  Purge Legacy Demo Records ({legacyDemoCount})
+                </button>
+              )}
             </div>
 
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 font-mono tabular-nums">
+            <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 font-mono tabular-nums">
+              <div className="apple-surface rounded-2xl p-5">
+                <p className="text-xs font-sans text-[#A1A1AA]">Live Win Rate</p>
+                <p className="mt-2 text-2xl font-semibold text-[#E5C76B]">
+                  {tradingStats.winRateFormatted}
+                </p>
+                <p className="mt-1 text-[11px] text-[#8E8E93]">
+                  {tradingStats.wins}W · {tradingStats.losses}L
+                </p>
+              </div>
               <div className="apple-surface rounded-2xl p-5">
                 <p className="text-xs font-sans text-[#A1A1AA]">Pending VIP Requests</p>
                 <p className="mt-2 text-2xl font-semibold text-[#E5C76B]">
@@ -1515,7 +1498,7 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
                   {pubSignals.filter((s) => !LEGACY_DEMO_SIGNAL_IDS.has(s.id)).length}
                 </p>
               </div>
-              <div className="apple-surface rounded-2xl p-5">
+              <div className="apple-surface rounded-2xl p-5 col-span-2 lg:col-span-1">
                 <p className="text-xs font-sans text-[#A1A1AA]">Registered Members</p>
                 <p className="mt-2 text-2xl font-semibold text-[#F5F5F7]">{allUsers.length}</p>
               </div>
@@ -1648,6 +1631,7 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
                     type="number"
                     step="any"
                     required
+                    placeholder="e.g. 2650.00"
                     value={sigEntry}
                     onChange={(e) => setSigEntry(e.target.value)}
                     className="w-full px-3 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm"
@@ -1659,6 +1643,7 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
                     type="number"
                     step="any"
                     required
+                    placeholder="e.g. 2662.00"
                     value={sigTp}
                     onChange={(e) => setSigTp(e.target.value)}
                     className="w-full px-3 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm"
@@ -1670,6 +1655,7 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
                     type="number"
                     step="any"
                     required
+                    placeholder="e.g. 2675.00"
                     value={sigExtraTp}
                     onChange={(e) => setSigExtraTp(e.target.value)}
                     className="w-full px-3 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm"
@@ -1681,6 +1667,7 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
                     type="number"
                     step="any"
                     required
+                    placeholder="e.g. 2642.00"
                     value={sigSl}
                     onChange={(e) => setSigSl(e.target.value)}
                     className="w-full px-3 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm"
@@ -2433,11 +2420,13 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
             </form>
 
             <div className="space-y-3">
-              {allVideos.map((v) => (
-                <div
-                  key={v.id}
-                  className="apple-surface rounded-xl p-4 flex items-center justify-between gap-4"
-                >
+              {allVideos
+                .filter((v) => !LEGACY_DEMO_VIDEO_IDS.has(v.id))
+                .map((v) => (
+                  <div
+                    key={v.id}
+                    className="apple-surface rounded-xl p-4 flex items-center justify-between gap-4"
+                  >
                   <div className="min-w-0">
                     <p className="text-sm font-semibold text-[#F5F5F7] truncate">{v.title}</p>
                     <p className="text-xs text-[#A1A1AA] truncate">{v.youtubeUrl} · {v.status}</p>
@@ -2651,7 +2640,9 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
             </form>
 
             <div className="space-y-3">
-              {allFreeBooks.map((b) => (
+              {allFreeBooks
+                .filter((b) => !LEGACY_DEMO_FREE_BOOK_IDS.has(b.id))
+                .map((b) => (
                 <div
                   key={b.id}
                   className="apple-surface rounded-xl p-4 flex items-center justify-between gap-4"
@@ -2894,7 +2885,9 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
             </form>
 
             <div className="space-y-3">
-              {allPaidBooks.map((b) => (
+              {allPaidBooks
+                .filter((b) => !LEGACY_DEMO_PAID_BOOK_IDS.has(b.id))
+                .map((b) => (
                 <div
                   key={b.id}
                   className="apple-surface rounded-xl p-4 flex items-center justify-between gap-4"
@@ -3509,15 +3502,17 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-[#A1A1AA] mb-1">Win Rate Display</label>
-                  <input
-                    type="text"
-                    value={draftSettings.winRate}
-                    onChange={(e) =>
-                      setDraftSettings({ ...draftSettings, winRate: e.target.value })
-                    }
-                    className="w-full px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm font-mono"
-                  />
+                  <label className="block text-xs text-[#A1A1AA] mb-1">
+                    Win Rate (Automatic from Closed Signals)
+                  </label>
+                  <div className="w-full px-3.5 py-2 rounded-xl bg-white/[0.03] border border-white/10 text-sm font-mono tabular-nums text-[#E5C76B] flex items-center justify-between gap-2">
+                    <span className="font-semibold">{tradingStats.winRateFormatted}</span>
+                    <span className="text-xs text-[#8E8E93]">
+                      {tradingStats.closedSignals === 0
+                        ? '0 Closed Trades'
+                        : `${tradingStats.wins}W · ${tradingStats.losses}L`}
+                    </span>
+                  </div>
                 </div>
                 <div>
                   <label className="block text-xs text-[#A1A1AA] mb-1">
@@ -3887,7 +3882,7 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
                 />
                 <input
                   type="email"
-                  placeholder="Contact Email"
+                  placeholder="Contact Email (tradewithamithyt@gmail.com)"
                   value={draftSettings.contactEmail}
                   onChange={(e) =>
                     setDraftSettings({ ...draftSettings, contactEmail: e.target.value })

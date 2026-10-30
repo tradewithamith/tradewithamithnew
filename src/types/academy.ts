@@ -195,6 +195,18 @@ export interface VisitorStatistics {
   lastSessionId: string;
 }
 
+export interface TradingPerformanceStats {
+  totalSignals: number;
+  activeSignals: number;
+  closedSignals: number;
+  wins: number;
+  losses: number;
+  breakeven: number;
+  totalNetPips: number;
+  winRatePercent: number;
+  winRateFormatted: string;
+}
+
 export interface AcademySettings {
   siteName: string;
   logoUrl: string;
@@ -237,8 +249,8 @@ export const DEFAULT_SETTINGS: AcademySettings = {
   heroSubtitle: 'Malaysian Support & Resistance · MSNR Trading Education & XAUUSD Analysis',
   msnrDescription:
     'Precision institutional gold trading built on unmitigated Malaysian Support & Resistance (MSNR) roadblocks, multi-timeframe storyline alignment, and disciplined London and New York execution.',
-  winRate: '89.4%',
-  subscriberCountFallback: '336',
+  winRate: '0%',
+  subscriberCountFallback: '',
   youtubeChannelId: 'UCKwo4dtX8sFrJcW5I5tZ0cw',
   youtubeChannelUrl: 'https://www.youtube.com/@tradewithamithYT',
   youtubeGateEnabled: true,
@@ -249,17 +261,15 @@ export const DEFAULT_SETTINGS: AcademySettings = {
   vipMonthlyPrice: 15,
   exnessReferralUrl: 'https://one.exnessonelink.com/a/56mms8g0qe',
   exnessMinDeposit: 30,
-  thirdMethodEnabled: true,
-  thirdMethodTitle: 'USDT TRC20 / Bank Transfer',
-  thirdMethodDescription:
-    'Direct quarterly or custom VIP enrollment via USDT (TRC20) or local bank transfer with manual admin verification.',
-  thirdMethodPrice: '$39 / Quarter',
-  thirdMethodPayment: 'USDT TRC20 Network',
-  thirdMethodInstructions:
-    'Contact our verification desk via Telegram (@TradeWithAmithBot) for the active settlement address, then submit your transfer hash and Telegram handle below.',
-  thirdMethodFields: 'TxHash or Transfer Reference ID',
+  thirdMethodEnabled: false,
+  thirdMethodTitle: '',
+  thirdMethodDescription: '',
+  thirdMethodPrice: '',
+  thirdMethodPayment: '',
+  thirdMethodInstructions: '',
+  thirdMethodFields: '',
   telegramUrl: 'https://t.me/TradeWithAmithBot',
-  contactEmail: 'emoneywithamith@gmail.com',
+  contactEmail: 'tradewithamithyt@gmail.com',
   instagramUrl: 'https://www.youtube.com/@tradewithamithYT',
   sheetsVideosUrl: '',
   sheetsFreePdfsUrl: '',
@@ -270,9 +280,6 @@ export const DEFAULT_SETTINGS: AcademySettings = {
   onboardingNotifMessage: 'Welcome to MSNR Academy. Enable instant alerts for XAUUSD VIP execution updates.',
 };
 
-const now = Date.now();
-const dayMs = 86_400_000;
-
 export const LEGACY_DEMO_SIGNAL_IDS: ReadonlySet<string> = new Set([
   'sig_xau_active_01',
   'sig_xau_active_02',
@@ -282,91 +289,24 @@ export const LEGACY_DEMO_SIGNAL_IDS: ReadonlySet<string> = new Set([
   'sig_xau_hist_04',
 ]);
 
-// No fake or auto-generated signals — pips are ONLY counted from real admin-published signals.
+export const LEGACY_DEMO_VIDEO_IDS: ReadonlySet<string> = new Set([
+  'vid_msnr_01',
+  'vid_msnr_02',
+  'vid_msnr_03',
+]);
+
+export const LEGACY_DEMO_FREE_BOOK_IDS: ReadonlySet<string> = new Set([
+  'free_msnr_foundations',
+  'free_xauusd_checklist',
+]);
+
+export const LEGACY_DEMO_PAID_BOOK_IDS: ReadonlySet<string> = new Set([
+  'paid_msnr_playbook',
+  'paid_xauusd_atlas',
+]);
+
+// Zero demo content — only real admin-published items are displayed on the website.
 export const STARTER_SIGNALS_PUBLIC: VipSignalPublic[] = [];
-
-export const STARTER_VIDEOS: AcademyVideo[] = [
-  {
-    id: 'vid_msnr_01',
-    title: 'MSNR Masterclass: Drawing Fresh H4 & Daily Support & Resistance',
-    youtubeUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
-    thumbnail: ASSETS.videoThumb,
-    description:
-      'Step-by-step breakdown of line-chart A and V reversal levels, OC-Gap zones, and filtering out tested retail levels on XAUUSD.',
-    date: new Date(now - 2 * dayMs).toISOString().slice(0, 10),
-    status: 'ACTIVE',
-    createdAtMs: now - 2 * dayMs,
-  },
-  {
-    id: 'vid_msnr_02',
-    title: 'XAUUSD Storyline Alignment: Monthly Roadblocks to M15 Entry',
-    youtubeUrl: 'https://www.youtube.com/watch?v=aqz-KE-bpKQ',
-    thumbnail: ASSETS.heroTerminal,
-    description:
-      'How institutional gold orderflow respects higher-timeframe Malaysian SNR roadblocks and confirms reversals during the London-New York overlap.',
-    date: new Date(now - 5 * dayMs).toISOString().slice(0, 10),
-    status: 'ACTIVE',
-    createdAtMs: now - 5 * dayMs,
-  },
-  {
-    id: 'vid_msnr_03',
-    title: 'Avoiding Gold Manipulation Sweeps Before High-Impact USD Releases',
-    youtubeUrl: 'https://www.youtube.com/watch?v=LXb3EKWsInQ',
-    thumbnail: ASSETS.videoThumb,
-    description:
-      'Identifying engineered inducement wicks into fresh MSNR Gap levels and waiting for body-close confirmation before placing risk.',
-    date: new Date(now - 9 * dayMs).toISOString().slice(0, 10),
-    status: 'ACTIVE',
-    createdAtMs: now - 9 * dayMs,
-  },
-];
-
-export const STARTER_FREE_BOOKS: FreeBook[] = [
-  {
-    id: 'free_msnr_foundations',
-    name: 'MSNR Foundations: Fresh Unmitigated Levels',
-    description:
-      'Essential field manual covering classical Malaysian A/V levels, OC-Gaps, and clean chart markup rules for XAUUSD beginners and intermediates.',
-    coverUrl: '',
-    pdfUrl: '/api/sample-pdf/msnr-foundations',
-    views: 1420,
-    downloads: 864,
-    status: 'ACTIVE',
-    createdAtMs: now - 10 * dayMs,
-  },
-  {
-    id: 'free_xauusd_checklist',
-    name: 'XAUUSD London & NY Session Pre-Trade Checklist',
-    description:
-      'Concise one-page institutional execution rubric verifying HTF roadblocks, session liquidity sweeps, and pip risk before placing orders.',
-    coverUrl: '',
-    pdfUrl: '/api/sample-pdf/xauusd-session-checklist',
-    views: 980,
-    downloads: 612,
-    status: 'ACTIVE',
-    createdAtMs: now - 7 * dayMs,
-  },
-];
-
-export const STARTER_PAID_BOOKS: PaidBookPublic[] = [
-  {
-    id: 'paid_msnr_playbook',
-    name: 'The Complete MSNR Institutional Playbook',
-    description:
-      'Comprehensive monograph covering multi-timeframe storyline construction, Miss Levels, RBS/SBR flips, and precision M5/M15 entry triggers.',
-    coverUrl: ASSETS.bookMsnr,
-    price: 29,
-    status: 'ACTIVE',
-    createdAtMs: now - 14 * dayMs,
-  },
-  {
-    id: 'paid_xauusd_atlas',
-    name: 'XAUUSD Gold Liquidity & Precision Entry Atlas',
-    description:
-      'Annotated gold case-study compendium dissecting high-ADR reversals, inducement traps, and runner management using MSNR structure.',
-    coverUrl: ASSETS.bookXauusd,
-    price: 35,
-    status: 'ACTIVE',
-    createdAtMs: now - 8 * dayMs,
-  },
-];
+export const STARTER_VIDEOS: AcademyVideo[] = [];
+export const STARTER_FREE_BOOKS: FreeBook[] = [];
+export const STARTER_PAID_BOOKS: PaidBookPublic[] = [];

@@ -10,9 +10,12 @@ import { ResilientImage } from './ResilientImage';
 export const StaticInfoPage: React.FC<{ page: Exclude<StaticPageId, 'workspace' | 'admin'> }> = ({
   page,
 }) => {
-  const { settings } = useAcademy();
+  const { settings, tradingStats } = useAcademy();
   const [vipOpen, setVipOpen] = useState(false);
   const [contactSent, setContactSent] = useState(false);
+  const [inqName, setInqName] = useState('');
+  const [inqEmail, setInqEmail] = useState('');
+  const [inqMessage, setInqMessage] = useState('');
 
   return (
     <div className="min-h-screen bg-[#070709] text-[#F5F5F7] flex flex-col">
@@ -75,9 +78,14 @@ export const StaticInfoPage: React.FC<{ page: Exclude<StaticPageId, 'workspace' 
                   <p className="mt-1 text-base font-semibold text-[#E5C76B]">XAUUSD Gold</p>
                 </div>
                 <div className="apple-surface rounded-2xl p-5">
-                  <p className="text-xs text-[#8E8E93]">Historical Win Rate</p>
-                  <p className="mt-1 text-base font-semibold font-mono tabular-nums text-[#F5F5F7]">
-                    {settings.winRate}
+                  <p className="text-xs text-[#8E8E93]">Live Win Rate</p>
+                  <p className="mt-1 text-base font-semibold font-mono tabular-nums text-[#E5C76B]">
+                    {tradingStats.winRateFormatted}
+                  </p>
+                  <p className="mt-0.5 text-[11px] font-mono tabular-nums text-[#8E8E93]">
+                    {tradingStats.closedSignals === 0
+                      ? '0 Closed Trades'
+                      : `${tradingStats.wins}W · ${tradingStats.losses}L (${tradingStats.closedSignals} Closed)`}
                   </p>
                 </div>
               </div>
@@ -169,6 +177,15 @@ export const StaticInfoPage: React.FC<{ page: Exclude<StaticPageId, 'workspace' 
               <form
                 onSubmit={(e) => {
                   e.preventDefault();
+                  const subject = encodeURIComponent(
+                    `[${settings.siteName}] Inquiry from ${inqName.trim()}`
+                  );
+                  const body = encodeURIComponent(
+                    `Name: ${inqName.trim()}\nEmail: ${inqEmail.trim()}\n\n${inqMessage.trim()}`
+                  );
+                  const mailLink = document.createElement('a');
+                  mailLink.href = `mailto:${settings.contactEmail}?subject=${subject}&body=${body}`;
+                  mailLink.click();
                   setContactSent(true);
                 }}
                 className="apple-surface rounded-2xl p-6 space-y-4"
@@ -178,12 +195,16 @@ export const StaticInfoPage: React.FC<{ page: Exclude<StaticPageId, 'workspace' 
                   <input
                     type="text"
                     required
+                    value={inqName}
+                    onChange={(e) => setInqName(e.target.value)}
                     placeholder="Your Name"
                     className="px-3.5 py-2.5 rounded-xl bg-white/[0.04] border border-white/10 text-sm text-[#F5F5F7] focus:outline-none focus:border-[#D4AF37]"
                   />
                   <input
                     type="email"
                     required
+                    value={inqEmail}
+                    onChange={(e) => setInqEmail(e.target.value)}
                     placeholder="Email Address"
                     className="px-3.5 py-2.5 rounded-xl bg-white/[0.04] border border-white/10 text-sm text-[#F5F5F7] focus:outline-none focus:border-[#D4AF37]"
                   />
@@ -191,19 +212,21 @@ export const StaticInfoPage: React.FC<{ page: Exclude<StaticPageId, 'workspace' 
                 <textarea
                   rows={3}
                   required
+                  value={inqMessage}
+                  onChange={(e) => setInqMessage(e.target.value)}
                   placeholder="How can we help with VIP access, Exness verification, or MSNR study material?"
                   className="w-full px-3.5 py-2.5 rounded-xl bg-white/[0.04] border border-white/10 text-sm text-[#F5F5F7] focus:outline-none focus:border-[#D4AF37]"
                 />
                 {contactSent ? (
                   <p className="text-xs text-[#30D158] font-medium">
-                    Thank you. For fastest verification response, also message our Telegram desk above.
+                    Your email client has been opened to message {settings.contactEmail}. For fastest verification response, you may also message our Telegram desk above.
                   </p>
                 ) : (
                   <button
                     type="submit"
                     className="px-5 py-2.5 rounded-xl bg-[#D4AF37] text-[#09090B] text-xs font-semibold hover:bg-[#E5C76B] transition-colors"
                   >
-                    Send Message
+                    Email {settings.contactEmail}
                   </button>
                 )}
               </form>
@@ -252,6 +275,22 @@ export const StaticInfoPage: React.FC<{ page: Exclude<StaticPageId, 'workspace' 
                   results in immediate access revocation.
                 </p>
               </section>
+
+              <section className="space-y-2">
+                <h2 className="text-base font-semibold text-[#F5F5F7]">
+                  4. Official Legal &amp; Support Contact
+                </h2>
+                <p className="text-[#A1A1AA]">
+                  For membership verification or legal inquiries, contact{' '}
+                  <a
+                    href={`mailto:${settings.contactEmail}`}
+                    className="text-[#E5C76B] hover:underline"
+                  >
+                    {settings.contactEmail}
+                  </a>
+                  .
+                </p>
+              </section>
             </div>
           )}
 
@@ -297,6 +336,21 @@ export const StaticInfoPage: React.FC<{ page: Exclude<StaticPageId, 'workspace' 
                   operating system permission controls at all times.
                 </p>
               </section>
+              <section className="space-y-2">
+                <h2 className="text-base font-semibold text-[#F5F5F7]">
+                  4. Privacy &amp; Support Contact
+                </h2>
+                <p className="text-[#A1A1AA]">
+                  For account data inquiries or official support, contact us directly at{' '}
+                  <a
+                    href={`mailto:${settings.contactEmail}`}
+                    className="text-[#E5C76B] hover:underline"
+                  >
+                    {settings.contactEmail}
+                  </a>
+                  .
+                </p>
+              </section>
             </div>
           )}
         </div>
@@ -304,7 +358,12 @@ export const StaticInfoPage: React.FC<{ page: Exclude<StaticPageId, 'workspace' 
 
       <footer className="border-t border-white/[0.08] py-6 px-6 text-xs text-[#8E8E93]">
         <div className="max-w-4xl mx-auto flex flex-wrap items-center justify-between gap-4">
-          <span>© {new Date().getFullYear()} {settings.siteName} — MSNR Academy</span>
+          <span>
+            © {new Date().getFullYear()} {settings.siteName} ·{' '}
+            <a href={`mailto:${settings.contactEmail}`} className="hover:text-[#F5F5F7]">
+              {settings.contactEmail}
+            </a>
+          </span>
           <div className="flex items-center gap-5">
             <a href="./index.html" className="hover:text-[#F5F5F7]">Home</a>
             <a href="./about.html" className="hover:text-[#F5F5F7]">About</a>

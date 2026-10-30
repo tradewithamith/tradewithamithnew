@@ -81,61 +81,6 @@ function parseCsvRows(csvText: string): Record<string, string>[] {
   });
 }
 
-function buildValidPdfBuffer(title: string, subtitle: string, chapters: string[]): Buffer {
-  const sanitize = (str: string) =>
-    str.replace(/[()\\]/g, '').replace(/[^\x20-\x7E]/g, ' ');
-
-  const lines: string[] = [
-    'BT',
-    '/F1 20 Tf',
-    '54 742 Td',
-    `(TRADE WITH AMITH - MSNR ACADEMY) Tj`,
-    '0 -32 Td',
-    '/F1 15 Tf',
-    `(${sanitize(title)}) Tj`,
-    '0 -22 Td',
-    '/F2 11 Tf',
-    `(${sanitize(subtitle)}) Tj`,
-    '0 -32 Td',
-  ];
-
-  chapters.forEach((line, index) => {
-    lines.push('/F2 10.5 Tf');
-    lines.push(`(${index + 1}. ${sanitize(line)}) Tj`);
-    lines.push('0 -22 Td');
-  });
-
-  lines.push('0 -18 Td');
-  lines.push('/F2 9 Tf');
-  lines.push('(Copyright Trade With Amith - Malaysian Support & Resistance Academy. Educational Reference.) Tj');
-  lines.push('ET');
-
-  const streamContent = lines.join('\n');
-  const objects = [
-    '1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n',
-    '2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n',
-    '3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R /F2 6 0 R >> >> >>\nendobj\n',
-    `4 0 obj\n<< /Length ${Buffer.byteLength(streamContent, 'utf8')} >>\nstream\n${streamContent}\nendstream\nendobj\n`,
-    '5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>\nendobj\n',
-    '6 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n',
-  ];
-
-  let pdf = '%PDF-1.4\n';
-  const offsets: number[] = [0];
-  for (const obj of objects) {
-    offsets.push(Buffer.byteLength(pdf, 'utf8'));
-    pdf += obj;
-  }
-  const xrefStart = Buffer.byteLength(pdf, 'utf8');
-  pdf += `xref\n0 ${objects.length + 1}\n`;
-  pdf += '0000000000 65535 f \n';
-  for (let i = 1; i < offsets.length; i++) {
-    pdf += `${String(offsets[i]).padStart(10, '0')} 00000 n \n`;
-  }
-  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefStart}\n%%EOF`;
-  return Buffer.from(pdf, 'utf8');
-}
-
 async function startServer() {
   const app = express();
   const httpServer = createHttpServer(app);
@@ -247,64 +192,7 @@ async function startServer() {
     }
   });
 
-  // 3. Built-in real educational PDF generator for starter Academy guides
-  app.get('/api/sample-pdf/:slug', (req: Request, res: Response) => {
-    const slug = String(req.params.slug || 'msnr-guide').replace(/[^a-zA-Z0-9_-]/g, '');
-    const catalog: Record<string, { title: string; subtitle: string; chapters: string[] }> = {
-      'msnr-foundations': {
-        title: 'MSNR Foundations - Fresh Unmitigated Levels',
-        subtitle: 'Malaysian Support & Resistance Core Structure Guide',
-        chapters: [
-          'Identifying A-V Shape Line Chart Reversal Points on H4 and Daily Timeframes',
-          'Distinguishing Fresh Unmitigated SNR Levels from Tested Retail Zones',
-          'Gap Levels (OC-Gap) Between Consecutive Same-Color Candlesticks',
-          'Multi-Timeframe Storyline Alignment: Monthly -> Weekly -> Daily Roadblocks',
-          'Waiting for Lower-Timeframe Confirmation Before XAUUSD Execution',
-        ],
-      },
-      'xauusd-session-checklist': {
-        title: 'XAUUSD Gold London & New York Session Execution Checklist',
-        subtitle: 'Precision Pre-Trade Protocol for Gold Volatility Windows',
-        chapters: [
-          'Marking Asian Session High/Low Liquidity Sweeps Prior to London Open',
-          'Locating Nearest Fresh H1/H4 MSNR Support & Resistance Roadblocks',
-          'Validating Candlestick Body Close vs Wick Rejection at Key Gold Levels',
-          'Calculating Position Sizing Using Configurable XAUUSD Pip Multiplier',
-          'Trade Management: Scaling Partial Profit at TP1 and Protecting Breakeven',
-        ],
-      },
-      'msnr-masterbook-pro': {
-        title: 'The Complete MSNR Institutional Playbook (VIP Monograph)',
-        subtitle: 'Advanced Miss Levels, Breakout-Pullbacks & Storyline Mastery',
-        chapters: [
-          'Institutional Storyline Mapping: Where Price Comes From and Where Price Goes',
-          'Classical A/V Levels, Gap Levels, and RBS / SBR Flip Zones in XAUUSD',
-          'Engulfing Failure & Manipulation Traps Around High-Impact USD News',
-          'Precision Entry Refinement: H4 Roadblock to M15/M5 Confirmation Trigger',
-          'Compounding Discipline and Drawdown Control for Funded & Personal Accounts',
-        ],
-      },
-      'xauusd-liquidity-atlas': {
-        title: 'XAUUSD Gold Liquidity & Precision Entry Atlas (Premium Edition)',
-        subtitle: 'High-Probability Gold Setups Combining MSNR + Session Timing',
-        chapters: [
-          'Anatomy of a +150 Pip XAUUSD Reversal from Fresh Daily SNR',
-          'Spotting Inducement Zones Engineered Above/Below Clean MSNR Levels',
-          'Limit Order vs Confirmation Market Execution Rules in High ADR Conditions',
-          'Extra TP Runner Protocol: Capturing Full Intraday Expansion Waves',
-          'Complete 20-Point Pre-Flight Audit Before Placing Any Gold Position',
-        ],
-      },
-    };
-
-    const docSpec = catalog[slug] || catalog['msnr-foundations'];
-    const buffer = buildValidPdfBuffer(docSpec.title, docSpec.subtitle, docSpec.chapters);
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="${slug}.pdf"`);
-    res.send(buffer);
-  });
-
-  // 4. SSRF-safe external PDF binary proxy & attachment downloader for cover extraction & direct download
+  // 3. SSRF-safe external PDF binary proxy & attachment downloader for cover extraction & direct download
   const isSafeExternalHttpUrl = (raw: string): URL | null => {
     try {
       const u = new URL(raw);

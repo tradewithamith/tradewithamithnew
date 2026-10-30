@@ -12,7 +12,7 @@
 ## 2. The "Dirty Dozen" Adversarial Payloads
 
 1. **Self-Assigned Lifetime VIP**: Regular user attempts `setDoc('/vipGrants/attackerUid', { vipType: 'LIFETIME', vipCategory: 'EXNESS', approvalStatus: 'APPROVED', ... })` -> `PERMISSION_DENIED`.
-2. **Unverified Admin Email Spoof**: Attacker signs in with `email == 'emoneywithamith@gmail.com'` and `email_verified == false` to read `/users` or write `/settings/config` -> `PERMISSION_DENIED`.
+2. **Unverified Admin Email Spoof**: Attacker signs in with `email == 'tradewithamithyt@gmail.com'` and `email_verified == false` to read `/users` or write `/settings/config` -> `PERMISSION_DENIED`.
 3. **Expired Monthly VIP Signal Scrape**: User with `vipGrants/uid` where `vipType == 'MONTHLY'` and `vipExpiry < request.time` calls `getDoc('/vipSignalsPrivate/sig_1')` -> `PERMISSION_DENIED`.
 4. **Cross-Book Unlock Bypass**: User who purchased `book_1` (`bookAccess/uid_book_1`) attempts `getDoc('/paidBooksProtected/book_2')` -> `PERMISSION_DENIED`.
 5. **Shadow Ghost Field Injection on Profile**: User sends `updateDoc('/users/uid', { name: 'Amith', isAdmin: true, updatedAt: serverTimestamp() })` -> `PERMISSION_DENIED` (`hasOnly` blocks `isAdmin`).

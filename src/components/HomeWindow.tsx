@@ -1,5 +1,14 @@
 import React, { useState } from 'react';
-import { ArrowRight, ExternalLink, Laptop, LogOut, Send, Smartphone, Youtube } from 'lucide-react';
+import {
+  ArrowRight,
+  ExternalLink,
+  Laptop,
+  LogOut,
+  Mail,
+  Send,
+  Smartphone,
+  Youtube,
+} from 'lucide-react';
 import { useAcademy } from '../context/AcademyContext';
 import { parseFirebaseAuthError } from '../lib/firebase';
 import { formatTelegramHandle, normalizeTelegramUrl } from '../lib/integrations';
@@ -20,6 +29,7 @@ export const HomeWindow: React.FC<HomeWindowProps> = ({
   const {
     settings,
     subscriberCount,
+    tradingStats,
     visitorStats,
     user,
     vipGrant,
@@ -143,15 +153,51 @@ export const HomeWindow: React.FC<HomeWindowProps> = ({
         </div>
       </div>
 
-      {/* 2. Home Page Statistics Strip (Admin Controlled + Live YouTube Subscriber Sync) */}
+      {/* 2. Home Page Live Performance Strip (100% Real Trading Results — Zero Fake Stats) */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="apple-surface rounded-2xl p-5 space-y-1.5">
+        <button
+          type="button"
+          onClick={() => onSelectWindow('signals')}
+          className="apple-surface rounded-2xl p-5 space-y-1.5 text-left hover:border-[#D4AF37]/45 transition-colors"
+        >
           <p className="text-xs font-medium text-[#A1A1AA]">Win Rate</p>
           <p className="text-2xl sm:text-3xl font-semibold font-mono tabular-nums text-[#E5C76B]">
-            {settings.winRate}
+            {tradingStats.winRateFormatted}
           </p>
-          <p className="text-xs text-[#8E8E93]">Verified MSNR Setups</p>
-        </div>
+          <p className="text-xs font-mono tabular-nums text-[#8E8E93]">
+            {tradingStats.closedSignals === 0
+              ? tradingStats.activeSignals > 0
+                ? `${tradingStats.activeSignals} Active · 0 Closed`
+                : '0 Closed Trades'
+              : `${tradingStats.wins}W · ${tradingStats.losses}L${
+                  tradingStats.breakeven > 0 ? ` · ${tradingStats.breakeven}BE` : ''
+                } (${tradingStats.closedSignals} Closed)`}
+          </p>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => onSelectWindow('signals')}
+          className="apple-surface rounded-2xl p-5 space-y-1.5 text-left hover:border-[#D4AF37]/45 transition-colors"
+        >
+          <p className="text-xs font-medium text-[#A1A1AA]">Realized Pips</p>
+          <p
+            className={`text-2xl sm:text-3xl font-semibold font-mono tabular-nums ${
+              tradingStats.totalNetPips > 0
+                ? 'text-[#30D158]'
+                : tradingStats.totalNetPips < 0
+                ? 'text-[#FF453A]'
+                : 'text-[#F5F5F7]'
+            }`}
+          >
+            {tradingStats.totalNetPips === 0
+              ? '0 PIPS'
+              : `${tradingStats.totalNetPips > 0 ? '+' : ''}${tradingStats.totalNetPips.toLocaleString()} PIPS`}
+          </p>
+          <p className="text-xs font-mono tabular-nums text-[#8E8E93]">
+            {tradingStats.totalSignals} Published {tradingStats.totalSignals === 1 ? 'Signal' : 'Signals'}
+          </p>
+        </button>
 
         <a
           href={settings.youtubeChannelUrl}
@@ -160,27 +206,23 @@ export const HomeWindow: React.FC<HomeWindowProps> = ({
           className="apple-surface rounded-2xl p-5 space-y-1.5 hover:border-[#D4AF37]/45 transition-colors group block"
         >
           <div className="flex items-center justify-between gap-2">
-            <p className="text-xs font-medium text-[#A1A1AA]">Students</p>
+            <p className="text-xs font-medium text-[#A1A1AA]">YouTube Academy</p>
             <ExternalLink className="w-3.5 h-3.5 text-[#8E8E93] group-hover:text-[#D4AF37] transition-colors" />
           </div>
-          <p className="text-2xl sm:text-3xl font-semibold font-mono tabular-nums text-[#F5F5F7]">
-            {subscriberCount}
+          <p className="text-xl sm:text-2xl font-semibold font-mono tabular-nums text-[#F5F5F7] truncate">
+            {subscriberCount || '@tradewithamithYT'}
           </p>
-          <p className="text-xs text-[#8E8E93]">YouTube Academy Community</p>
+          <p className="text-xs text-[#8E8E93]">
+            {subscriberCount ? 'Live Channel Subscribers' : 'Official YouTube Channel'}
+          </p>
         </a>
 
         <div className="apple-surface rounded-2xl p-5 space-y-1.5">
-          <p className="text-xs font-medium text-[#A1A1AA]">XAUUSD</p>
-          <p className="text-2xl sm:text-3xl font-semibold text-[#F5F5F7]">Gold</p>
-          <p className="text-xs text-[#8E8E93]">Primary Spot Instrument</p>
-        </div>
-
-        <div className="apple-surface rounded-2xl p-5 space-y-1.5">
-          <p className="text-xs font-medium text-[#A1A1AA]">MSNR</p>
+          <p className="text-xs font-medium text-[#A1A1AA]">XAUUSD · MSNR</p>
           <p className="text-xl sm:text-2xl font-semibold text-[#F5F5F7] leading-snug">
             Malaysian S&amp;R
           </p>
-          <p className="text-xs text-[#8E8E93]">Unmitigated Level Precision</p>
+          <p className="text-xs text-[#8E8E93]">Spot Gold Precision</p>
         </div>
       </div>
 
@@ -377,6 +419,13 @@ export const HomeWindow: React.FC<HomeWindowProps> = ({
           >
             <Send className="w-3.5 h-3.5 text-[#D4AF37]" />
             <span>{formatTelegramHandle(settings.telegramUrl)}</span>
+          </a>
+          <a
+            href={`mailto:${settings.contactEmail}`}
+            className="inline-flex items-center gap-1.5 text-[#D1D1D6] hover:text-[#F5F5F7] transition-colors whitespace-nowrap"
+          >
+            <Mail className="w-3.5 h-3.5 text-[#E5C76B]" />
+            <span>{settings.contactEmail}</span>
           </a>
           <span aria-hidden="true" className="text-white/15">·</span>
           <a href="./about.html" className="hover:text-[#F5F5F7] transition-colors whitespace-nowrap">

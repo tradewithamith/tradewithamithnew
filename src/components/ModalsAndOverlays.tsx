@@ -6,6 +6,7 @@ import {
   Download,
   ExternalLink,
   Laptop,
+  Mail,
   Send,
   Share,
   Smartphone,
@@ -287,15 +288,24 @@ export const VipJoinModal: React.FC<{
                 </>
               )}
 
-              <div className="pt-2 border-t border-white/[0.07]">
+              <div className="pt-2 border-t border-white/[0.07] space-y-2">
                 <a
                   href={normalizeTelegramUrl(settings.telegramUrl)}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 text-xs font-medium text-[#A1A1AA] hover:text-[#E5C76B] transition-colors"
+                  className="flex items-center gap-2 text-xs font-medium text-[#A1A1AA] hover:text-[#E5C76B] transition-colors"
                 >
-                  <Send className="w-3.5 h-3.5 text-[#D4AF37]" />
-                  <span>Verification Support: {formatTelegramHandle(settings.telegramUrl)}</span>
+                  <Send className="w-3.5 h-3.5 text-[#D4AF37] shrink-0" />
+                  <span className="truncate">
+                    Verification Support: {formatTelegramHandle(settings.telegramUrl)}
+                  </span>
+                </a>
+                <a
+                  href={`mailto:${settings.contactEmail}`}
+                  className="flex items-center gap-2 text-xs font-medium text-[#A1A1AA] hover:text-[#E5C76B] transition-colors"
+                >
+                  <Mail className="w-3.5 h-3.5 text-[#E5C76B] shrink-0" />
+                  <span className="truncate">{settings.contactEmail}</span>
                 </a>
               </div>
             </div>

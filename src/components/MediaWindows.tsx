@@ -417,8 +417,14 @@ export const VideosWindow: React.FC = () => {
 
       {filtered.length === 0 ? (
         <div className="apple-surface rounded-2xl p-10 text-center space-y-2">
-          <p className="text-base font-medium text-[#F5F5F7]">No Matching Videos</p>
-          <p className="text-sm text-[#A1A1AA]">Try another keyword or clear your search filter.</p>
+          <p className="text-base font-medium text-[#F5F5F7]">
+            {videos.length === 0 ? 'No Videos Published Yet' : 'No Matching Videos'}
+          </p>
+          <p className="text-sm text-[#A1A1AA]">
+            {videos.length === 0
+              ? 'New MSNR educational lessons and masterclasses will appear here once published.'
+              : 'Try another keyword or clear your search filter.'}
+          </p>
         </div>
       ) : (
         <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-5">
@@ -571,8 +577,16 @@ export const FreePdfsWindow: React.FC = () => {
         </h2>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 sm:gap-6">
-        {freeBooks.map((book) => {
+      {freeBooks.length === 0 ? (
+        <div className="apple-surface rounded-2xl p-10 text-center space-y-2">
+          <p className="text-base font-medium text-[#F5F5F7]">No Free PDF Guides Published Yet</p>
+          <p className="text-sm text-[#A1A1AA]">
+            Free MSNR study guides and checklists will appear here once published.
+          </p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 gap-3 sm:gap-6">
+          {freeBooks.map((book) => {
           const extra = localMetrics[book.id] || { v: 0, d: 0 };
           const views = book.views + extra.v;
           const downloads = book.downloads + extra.d;
@@ -645,8 +659,9 @@ export const FreePdfsWindow: React.FC = () => {
               </div>
             </article>
           );
-        })}
-      </div>
+          })}
+        </div>
+      )}
     </div>
   );
 };
@@ -762,8 +777,16 @@ export const PaidPdfsWindow: React.FC = () => {
         </h2>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 sm:gap-6">
-        {paidBooks.map((book) => {
+      {paidBooks.length === 0 ? (
+        <div className="apple-surface rounded-2xl p-10 text-center space-y-2">
+          <p className="text-base font-medium text-[#F5F5F7]">No Premium PDF Books Published Yet</p>
+          <p className="text-sm text-[#A1A1AA]">
+            Premium MSNR playbooks and digital editions will appear here once published.
+          </p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 gap-3 sm:gap-6">
+          {paidBooks.map((book) => {
           const isUnlocked = isAdmin || bookAccessMap[book.id]?.status === 'APPROVED';
           const isDownloading = downloadingId === book.id;
 
@@ -853,8 +876,9 @@ export const PaidPdfsWindow: React.FC = () => {
               </div>
             </article>
           );
-        })}
-      </div>
+          })}
+        </div>
+      )}
 
       {/* Apple-Style Individual Book Purchase Modal */}
       {purchaseTarget && (

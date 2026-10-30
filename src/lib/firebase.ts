@@ -16,17 +16,23 @@ import {
 } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 import firebaseConfig from '../../firebase-applet-config.json';
-import type { SignalDirection, SignalResult } from '../types/academy';
+import type {
+  SignalDirection,
+  SignalResult,
+  TradingPerformanceStats,
+  VipSignalPublic,
+} from '../types/academy';
 
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const auth = getAuth(app);
 export const storage = getStorage(app);
 
-export const BOOTSTRAPPED_ADMIN_EMAIL = 'emoneywithamith@gmail.com';
+export const BOOTSTRAPPED_ADMIN_EMAIL = 'tradewithamithyt@gmail.com';
 export const BOOTSTRAPPED_ADMIN_EMAILS = [
   'emoneywithamith@gmail.com',
   'amithmadumal19941029@gmail.com',
+  'tradewithamithyt@gmail.com',
 ] as const;
 
 export function isBootstrappedAdminEmail(email?: string | null): boolean {
@@ -353,4 +359,66 @@ export function calculateTargetPips(params: {
   if (!Number.isFinite(entry) || !Number.isFinite(tp)) return 0;
   const rawMove = direction === 'BUY' ? tp - entry : entry - tp;
   return Math.round(rawMove * mult);
+}
+
+/**
+ * Automatically calculates live Win Rate and trade breakdown strictly from
+ * real published trading signals. Zero hardcoded or fake values.
+ */
+export function computeTradingPerformanceStats(
+  signals: VipSignalPublic[]
+): TradingPerformanceStats {
+  let activeSignals = 0;
+  let closedSignals = 0;
+  let wins = 0;
+  let losses = 0;
+  let breakeven = 0;
+  let totalNetPips = 0;
+
+  for (const sig of signals) {
+    if (sig.result === 'ACTIVE') {
+      activeSignals += 1;
+      continue;
+    }
+
+    closedSignals += 1;
+    const realizedPips = Number(sig.pips) || 0;
+    totalNetPips += realizedPips;
+
+    if (sig.result === 'TP HIT') {
+      wins += 1;
+    } else if (sig.result === 'SL HIT') {
+      losses += 1;
+    } else if (sig.result === 'CLOSED') {
+      if (realizedPips > 0) {
+        wins += 1;
+      } else if (realizedPips < 0) {
+        losses += 1;
+      } else {
+        breakeven += 1;
+      }
+    }
+  }
+
+  const decidedCount = wins + losses;
+  const rawPercent = decidedCount > 0 ? (wins / decidedCount) * 100 : 0;
+  const rounded1 = Math.round(rawPercent * 10) / 10;
+  const winRateFormatted =
+    decidedCount === 0
+      ? '0%'
+      : Number.isInteger(rounded1)
+      ? `${rounded1}%`
+      : `${rounded1.toFixed(1)}%`;
+
+  return {
+    totalSignals: signals.length,
+    activeSignals,
+    closedSignals,
+    wins,
+    losses,
+    breakeven,
+    totalNetPips,
+    winRatePercent: rounded1,
+    winRateFormatted,
+  };
 }

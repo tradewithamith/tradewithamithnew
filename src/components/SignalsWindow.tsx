@@ -9,7 +9,7 @@ interface SignalsWindowProps {
 }
 
 export const SignalsWindow: React.FC<SignalsWindowProps> = ({ onOpenVipJoin }) => {
-  const { signals, isVipActive, settings, vipGrant, isAdmin } = useAcademy();
+  const { signals, tradingStats, isVipActive, settings, vipGrant, isAdmin } = useAcademy();
   const [tab, setTab] = useState<'active' | 'history'>('active');
 
   const todayIso = new Date().toISOString().slice(0, 10);
@@ -259,8 +259,20 @@ export const SignalsWindow: React.FC<SignalsWindowProps> = ({ onOpenVipJoin }) =
         </div>
       </div>
 
-      {/* Automatic Pip Calculator Summary */}
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3.5 font-mono tabular-nums">
+      {/* Automatic Win Rate & Pip Calculator Summary */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3.5 font-mono tabular-nums">
+        <div className="apple-surface rounded-xl p-4">
+          <p className="text-xs font-sans text-[#A1A1AA]">Win Rate</p>
+          <p className="mt-1.5 text-lg font-semibold text-[#E5C76B]">
+            {tradingStats.winRateFormatted}
+          </p>
+          <p className="mt-0.5 text-[11px] text-[#8E8E93]">
+            {tradingStats.closedSignals === 0
+              ? '0 Closed'
+              : `${tradingStats.wins}W · ${tradingStats.losses}L`}
+          </p>
+        </div>
+
         <div className="apple-surface rounded-xl p-4">
           <p className="text-xs font-sans text-[#A1A1AA]">Daily Pips</p>
           <p
@@ -313,7 +325,7 @@ export const SignalsWindow: React.FC<SignalsWindowProps> = ({ onOpenVipJoin }) =
           </p>
         </div>
 
-        <div className="apple-surface rounded-xl p-4 col-span-2 lg:col-span-1">
+        <div className="apple-surface rounded-xl p-4">
           <p className="text-xs font-sans text-[#A1A1AA]">Loss Pips</p>
           <p className="mt-1.5 text-lg font-semibold text-[#FF453A]">
             {pipSummary.lossPips > 0 ? `-${pipSummary.lossPips.toLocaleString()} PIPS` : '0 PIPS'}
@@ -402,13 +414,13 @@ export const SignalsWindow: React.FC<SignalsWindowProps> = ({ onOpenVipJoin }) =
                         {sig.direction}
                       </td>
                       <td className="py-3.5 px-4 text-right text-[#F5F5F7]">
-                        {unlocked ? sig.entry : <span className="blur-xs select-none">4140</span>}
+                        {unlocked ? sig.entry : <span className="blur-xs select-none">•••••</span>}
                       </td>
                       <td className="py-3.5 px-4 text-right text-[#30D158]">
-                        {unlocked ? sig.tp : <span className="blur-xs select-none">4152</span>}
+                        {unlocked ? sig.tp : <span className="blur-xs select-none">•••••</span>}
                       </td>
                       <td className="py-3.5 px-4 text-right text-[#FF453A]">
-                        {unlocked ? sig.sl : <span className="blur-xs select-none">4131</span>}
+                        {unlocked ? sig.sl : <span className="blur-xs select-none">•••••</span>}
                       </td>
                       <td
                         className={`py-3.5 px-4 font-sans text-xs font-semibold ${

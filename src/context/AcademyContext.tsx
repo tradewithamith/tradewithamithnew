@@ -16,6 +16,7 @@ import {
 import {
   auth,
   clampStr,
+  computeTradingPerformanceStats,
   consumeRedirectResult,
   db,
   handleFirestoreError,
@@ -28,16 +29,17 @@ import {
 } from '../lib/firebase';
 import {
   fetchYoutubeSubscriberCount,
+  getCalendarKeys,
   recordUniqueAuthenticatedVisit,
   verifyYoutubeSubscription,
   type YoutubeCheckResult,
 } from '../lib/integrations';
 import {
   DEFAULT_SETTINGS,
+  LEGACY_DEMO_FREE_BOOK_IDS,
+  LEGACY_DEMO_PAID_BOOK_IDS,
   LEGACY_DEMO_SIGNAL_IDS,
-  STARTER_FREE_BOOKS,
-  STARTER_PAID_BOOKS,
-  STARTER_VIDEOS,
+  LEGACY_DEMO_VIDEO_IDS,
   type AcademySettings,
   type AcademyVideo,
   type AppNotification,
@@ -48,6 +50,7 @@ import {
   type MarketAnalysisVideo,
   type MergedSignal,
   type PaidBookPublic,
+  type TradingPerformanceStats,
   type UserProfile,
   type VideoReactionType,
   type VipCategory,
@@ -75,6 +78,7 @@ interface AcademyContextValue {
   settings: AcademySettings;
   subscriberCount: string;
   signals: MergedSignal[];
+  tradingStats: TradingPerformanceStats;
   videos: AcademyVideo[];
   marketAnalysisVideos: MarketAnalysisVideo[];
   marketAnalysisReactionsSummary: Record<string, MarketAnalysisReactionSummary>;
@@ -83,7 +87,6 @@ interface AcademyContextValue {
   bookAccessMap: Record<string, BookAccessItem>;
   notifications: AppNotification[];
   visitorStats: VisitorStatistics;
-  usingStarterCatalog: boolean;
   gateVerified: boolean;
   gateMessage: string | null;
   gateBusy: boolean;
@@ -135,15 +138,18 @@ export const AcademyProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [broadcastNotifs, setBroadcastNotifs] = useState<AppNotification[]>([]);
   const [personalNotifs, setPersonalNotifs] = useState<AppNotification[]>([]);
 
-  const [visitorStats, setVisitorStats] = useState<VisitorStatistics>({
-    dayKey: new Date().toISOString().slice(0, 10),
-    weekKey: '',
-    monthKey: new Date().toISOString().slice(0, 7),
-    todayCount: 1,
-    weekCount: 1,
-    monthCount: 1,
-    totalCount: 1,
-    lastSessionId: '',
+  const [visitorStats, setVisitorStats] = useState<VisitorStatistics>(() => {
+    const { dayKey, weekKey, monthKey } = getCalendarKeys();
+    return {
+      dayKey,
+      weekKey,
+      monthKey,
+      todayCount: 0,
+      weekCount: 0,
+      monthCount: 0,
+      totalCount: 0,
+      lastSessionId: '',
+    };
   });
 
   const [gateVerified, setGateVerified] = useState<boolean>(() => {
@@ -279,11 +285,36 @@ export const AcademyProvider: React.FC<{ children: React.ReactNode }> = ({ child
           ) {
             merged.exnessReferralUrl = DEFAULT_SETTINGS.exnessReferralUrl;
           }
-          if (!data.telegramUrl || data.telegramUrl === 'https://t.me/TradeWithAmith') {
+          if (
+            !data.telegramUrl ||
+            data.telegramUrl === 'https://t.me/TradeWithAmith'
+          ) {
             merged.telegramUrl = DEFAULT_SETTINGS.telegramUrl;
           }
-          if (data.subscriberCountFallback === '24,800') {
-            merged.subscriberCountFallback = DEFAULT_SETTINGS.subscriberCountFallback;
+          if (
+            !data.contactEmail ||
+            data.contactEmail === 'emoneywithamith@gmail.com' ||
+            data.contactEmail === 'support@tradewithamith.com'
+          ) {
+            merged.contactEmail = DEFAULT_SETTINGS.contactEmail;
+          }
+          if (
+            data.subscriberCountFallback === '24,800' ||
+            data.subscriberCountFallback === '336'
+          ) {
+            merged.subscriberCountFallback = '';
+          }
+          if (
+            data.thirdMethodTitle === 'USDT TRC20 / Bank Transfer' &&
+            data.thirdMethodPrice === '$39 / Quarter'
+          ) {
+            merged.thirdMethodEnabled = false;
+            merged.thirdMethodTitle = '';
+            merged.thirdMethodDescription = '';
+            merged.thirdMethodPrice = '';
+            merged.thirdMethodPayment = '';
+            merged.thirdMethodInstructions = '';
+            merged.thirdMethodFields = '';
           }
           setSettings(merged);
         } else {
@@ -297,7 +328,18 @@ export const AcademyProvider: React.FC<{ children: React.ReactNode }> = ({ child
       doc(db, 'statistics', 'visitors'),
       (snap) => {
         if (snap.exists()) {
-          setVisitorStats(snap.data() as VisitorStatistics);
+          const raw = snap.data() as VisitorStatistics;
+          const { dayKey, weekKey, monthKey } = getCalendarKeys();
+          setVisitorStats({
+            dayKey,
+            weekKey,
+            monthKey,
+            todayCount: raw.dayKey === dayKey ? Number(raw.todayCount) || 0 : 0,
+            weekCount: raw.weekKey === weekKey ? Number(raw.weekCount) || 0 : 0,
+            monthCount: raw.monthKey === monthKey ? Number(raw.monthCount) || 0 : 0,
+            totalCount: Number(raw.totalCount) || 0,
+            lastSessionId: raw.lastSessionId || '',
+          });
         }
       },
       (err) => console.warn('Stats snapshot warning:', err)
@@ -461,6 +503,7 @@ export const AcademyProvider: React.FC<{ children: React.ReactNode }> = ({ child
         }
         const list: AcademyVideo[] = [];
         snap.forEach((d) => {
+          if (LEGACY_DEMO_VIDEO_IDS.has(d.id)) return;
           const raw = d.data();
           list.push({
             id: d.id,
@@ -488,6 +531,7 @@ export const AcademyProvider: React.FC<{ children: React.ReactNode }> = ({ child
         }
         const list: FreeBook[] = [];
         snap.forEach((d) => {
+          if (LEGACY_DEMO_FREE_BOOK_IDS.has(d.id)) return;
           const raw = d.data();
           list.push({
             id: d.id,
@@ -516,6 +560,7 @@ export const AcademyProvider: React.FC<{ children: React.ReactNode }> = ({ child
         }
         const list: PaidBookPublic[] = [];
         snap.forEach((d) => {
+          if (LEGACY_DEMO_PAID_BOOK_IDS.has(d.id)) return;
           const raw = d.data();
           list.push({
             id: d.id,
@@ -677,7 +722,23 @@ export const AcademyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     });
   }, [activeSignalsSource, isVipActive, signalsPrivateMap]);
 
-  const videos = dbVideos && dbVideos.length > 0 ? dbVideos : STARTER_VIDEOS;
+  // Automatic Live Win Rate & Performance Calculation from real trading signals
+  const tradingStats: TradingPerformanceStats = useMemo(() => {
+    // Recompute using private prices if admin/VIP has them loaded, else public realized pips
+    const normalizedSignals: VipSignalPublic[] = signals.map((sig) => ({
+      id: sig.id,
+      date: sig.date,
+      currency: sig.currency,
+      direction: sig.direction,
+      orderType: sig.orderType,
+      result: sig.result,
+      pips: sig.result === 'ACTIVE' ? 0 : Number(sig.pips) || 0,
+      createdAtMs: sig.createdAtMs,
+    }));
+    return computeTradingPerformanceStats(normalizedSignals);
+  }, [signals]);
+
+  const videos = useMemo(() => dbVideos ?? [], [dbVideos]);
   const marketAnalysisVideos = dbMarketAnalysisVideos;
 
   const marketAnalysisReactionsSummary = useMemo(() => {
@@ -701,12 +762,8 @@ export const AcademyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return summary;
   }, [dbMarketAnalysisReactions, user]);
 
-  const freeBooks = dbFreeBooks && dbFreeBooks.length > 0 ? dbFreeBooks : STARTER_FREE_BOOKS;
-  const paidBooks = dbPaidBooks && dbPaidBooks.length > 0 ? dbPaidBooks : STARTER_PAID_BOOKS;
-  const usingStarterCatalog =
-    (dbVideos?.length ?? 0) === 0 &&
-    (dbFreeBooks?.length ?? 0) === 0 &&
-    (dbPaidBooks?.length ?? 0) === 0;
+  const freeBooks = useMemo(() => dbFreeBooks ?? [], [dbFreeBooks]);
+  const paidBooks = useMemo(() => dbPaidBooks ?? [], [dbPaidBooks]);
 
   const notifications = useMemo(() => {
     return [...personalNotifs, ...broadcastNotifs].sort((a, b) => b.createdAtMs - a.createdAtMs);
@@ -866,12 +923,9 @@ export const AcademyProvider: React.FC<{ children: React.ReactNode }> = ({ child
         throw new Error('Authentication required to submit book purchase.');
       }
 
-      // Check if book exists in Firestore paidBooksPublic (starter books may not be seeded yet)
       const bookPubSnap = await getDoc(doc(db, 'paidBooksPublic', input.book.id));
       if (!bookPubSnap.exists()) {
-        throw new Error(
-          'This starter book has not been published in Admin -> Paid PDFs yet. Ask Admin to click "Initialize Starter Catalog" in Admin Overview.'
-        );
+        throw new Error('This book is no longer available in the catalog.');
       }
 
       const purchaseId = sanitizeId(`pur_${activeUser.uid.slice(0, 10)}_${Date.now()}`);
@@ -923,9 +977,6 @@ export const AcademyProvider: React.FC<{ children: React.ReactNode }> = ({ child
       if (snap.exists()) {
         return (snap.data() as { pdfUrl?: string }).pdfUrl || null;
       }
-      // Starter fallback for admin testing before seeding
-      if (bookId === 'paid_msnr_playbook') return '/api/sample-pdf/msnr-masterbook-pro';
-      if (bookId === 'paid_xauusd_atlas') return '/api/sample-pdf/xauusd-liquidity-atlas';
       return null;
     } catch (error) {
       handleFirestoreError(error, OperationType.GET, `paidBooksProtected/${bookId}`);
@@ -987,6 +1038,7 @@ export const AcademyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     settings,
     subscriberCount,
     signals,
+    tradingStats,
     videos,
     marketAnalysisVideos,
     marketAnalysisReactionsSummary,
@@ -995,7 +1047,6 @@ export const AcademyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     bookAccessMap,
     notifications,
     visitorStats,
-    usingStarterCatalog,
     gateVerified,
     gateMessage,
     gateBusy,
