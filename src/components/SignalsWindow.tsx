@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Lock, TrendingDown, TrendingUp } from 'lucide-react';
 import { useAcademy } from '../context/AcademyContext';
-import { calculateSignalPips } from '../lib/firebase';
+import { calculateSignalPips, calculateTargetPips } from '../lib/firebase';
 import type { MergedSignal } from '../types/academy';
 
 interface SignalsWindowProps {
@@ -16,21 +16,39 @@ export const SignalsWindow: React.FC<SignalsWindowProps> = ({ onOpenVipJoin }) =
   const currentMonthIso = todayIso.slice(0, 7);
   const sevenDaysAgoMs = Date.now() - 7 * 86_400_000;
 
-  // Compute live pip metrics using Admin's configurable XAUUSD pip multiplier
+  // Realized pips come strictly from settled admin-published signals (TP HIT, SL HIT, CLOSED).
+  // Active unsettled signals never add to realized pip statistics.
   const enrichedSignals = useMemo(() => {
     return signals.map((sig) => {
-      const computedPips =
-        sig.entry !== undefined && sig.tp !== undefined && sig.sl !== undefined
-          ? calculateSignalPips({
+      let realizedPips = 0;
+      if (sig.result !== 'ACTIVE') {
+        if (sig.result === 'CLOSED') {
+          realizedPips = Number(sig.pips) || 0;
+        } else if (sig.entry !== undefined && sig.tp !== undefined && sig.sl !== undefined) {
+          realizedPips = calculateSignalPips({
+            direction: sig.direction,
+            entry: sig.entry,
+            tp: sig.tp,
+            sl: sig.sl,
+            result: sig.result,
+            pipMultiplier: settings.pipMultiplier,
+          });
+        } else {
+          realizedPips = Number(sig.pips) || 0;
+        }
+      }
+
+      const targetPips =
+        sig.result === 'ACTIVE' && sig.entry !== undefined && sig.tp !== undefined
+          ? calculateTargetPips({
               direction: sig.direction,
               entry: sig.entry,
               tp: sig.tp,
-              sl: sig.sl,
-              result: sig.result,
               pipMultiplier: settings.pipMultiplier,
             })
-          : sig.pips;
-      return { ...sig, displayPips: computedPips };
+          : 0;
+
+      return { ...sig, displayPips: realizedPips, targetPips };
     });
   }, [signals, settings.pipMultiplier]);
 
@@ -67,9 +85,12 @@ export const SignalsWindow: React.FC<SignalsWindowProps> = ({ onOpenVipJoin }) =
     return { dailyTotal, monthlyTotal, overallTotal, profitPips, lossPips };
   }, [enrichedSignals, todayIso, currentMonthIso]);
 
-  const formatSignedPips = (val: number) => `${val >= 0 ? '+' : ''}${val.toLocaleString()} PIPS`;
+  const formatSignedPips = (val: number) => {
+    if (val === 0) return '0 PIPS';
+    return `${val > 0 ? '+' : ''}${val.toLocaleString()} PIPS`;
+  };
 
-  const renderSignalCard = (sig: MergedSignal & { displayPips: number }) => {
+  const renderSignalCard = (sig: MergedSignal & { displayPips: number; targetPips: number }) => {
     const isBuy = sig.direction === 'BUY';
     const hasPrivateDetails = isVipActive && sig.entry !== undefined;
 
@@ -108,15 +129,25 @@ export const SignalsWindow: React.FC<SignalsWindowProps> = ({ onOpenVipJoin }) =
           </div>
 
           <div className="text-right font-mono tabular-nums">
-            <span
-              className={`text-sm font-semibold ${
-                sig.displayPips >= 0 ? 'text-[#30D158]' : 'text-[#FF453A]'
-              }`}
-            >
-              {sig.result === 'ACTIVE'
-                ? `Target ${formatSignedPips(sig.displayPips)}`
-                : formatSignedPips(sig.displayPips)}
-            </span>
+            {sig.result === 'ACTIVE' ? (
+              <span className="text-xs sm:text-sm font-semibold text-[#E5C76B]">
+                {hasPrivateDetails && sig.targetPips !== 0
+                  ? `Target ${formatSignedPips(sig.targetPips)}`
+                  : 'LIVE · RUNNING'}
+              </span>
+            ) : (
+              <span
+                className={`text-sm font-semibold ${
+                  sig.displayPips > 0
+                    ? 'text-[#30D158]'
+                    : sig.displayPips < 0
+                    ? 'text-[#FF453A]'
+                    : 'text-[#D1D1D6]'
+                }`}
+              >
+                {formatSignedPips(sig.displayPips)}
+              </span>
+            )}
           </div>
         </div>
 
@@ -234,7 +265,11 @@ export const SignalsWindow: React.FC<SignalsWindowProps> = ({ onOpenVipJoin }) =
           <p className="text-xs font-sans text-[#A1A1AA]">Daily Pips</p>
           <p
             className={`mt-1.5 text-lg font-semibold ${
-              pipSummary.dailyTotal >= 0 ? 'text-[#30D158]' : 'text-[#FF453A]'
+              pipSummary.dailyTotal > 0
+                ? 'text-[#30D158]'
+                : pipSummary.dailyTotal < 0
+                ? 'text-[#FF453A]'
+                : 'text-[#D1D1D6]'
             }`}
           >
             {formatSignedPips(pipSummary.dailyTotal)}
@@ -245,7 +280,11 @@ export const SignalsWindow: React.FC<SignalsWindowProps> = ({ onOpenVipJoin }) =
           <p className="text-xs font-sans text-[#A1A1AA]">Monthly Pips</p>
           <p
             className={`mt-1.5 text-lg font-semibold ${
-              pipSummary.monthlyTotal >= 0 ? 'text-[#30D158]' : 'text-[#FF453A]'
+              pipSummary.monthlyTotal > 0
+                ? 'text-[#30D158]'
+                : pipSummary.monthlyTotal < 0
+                ? 'text-[#FF453A]'
+                : 'text-[#D1D1D6]'
             }`}
           >
             {formatSignedPips(pipSummary.monthlyTotal)}
@@ -256,7 +295,11 @@ export const SignalsWindow: React.FC<SignalsWindowProps> = ({ onOpenVipJoin }) =
           <p className="text-xs font-sans text-[#A1A1AA]">Overall Total</p>
           <p
             className={`mt-1.5 text-lg font-semibold ${
-              pipSummary.overallTotal >= 0 ? 'text-[#E5C76B]' : 'text-[#FF453A]'
+              pipSummary.overallTotal > 0
+                ? 'text-[#E5C76B]'
+                : pipSummary.overallTotal < 0
+                ? 'text-[#FF453A]'
+                : 'text-[#D1D1D6]'
             }`}
           >
             {formatSignedPips(pipSummary.overallTotal)}
@@ -266,14 +309,14 @@ export const SignalsWindow: React.FC<SignalsWindowProps> = ({ onOpenVipJoin }) =
         <div className="apple-surface rounded-xl p-4">
           <p className="text-xs font-sans text-[#A1A1AA]">Profit Pips</p>
           <p className="mt-1.5 text-lg font-semibold text-[#30D158]">
-            +{pipSummary.profitPips.toLocaleString()} PIPS
+            {pipSummary.profitPips > 0 ? `+${pipSummary.profitPips.toLocaleString()} PIPS` : '0 PIPS'}
           </p>
         </div>
 
         <div className="apple-surface rounded-xl p-4 col-span-2 lg:col-span-1">
           <p className="text-xs font-sans text-[#A1A1AA]">Loss Pips</p>
           <p className="mt-1.5 text-lg font-semibold text-[#FF453A]">
-            -{pipSummary.lossPips.toLocaleString()} PIPS
+            {pipSummary.lossPips > 0 ? `-${pipSummary.lossPips.toLocaleString()} PIPS` : '0 PIPS'}
           </p>
         </div>
       </div>

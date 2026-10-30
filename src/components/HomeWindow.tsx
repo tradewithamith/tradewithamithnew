@@ -242,6 +242,13 @@ export const HomeWindow: React.FC<HomeWindowProps> = ({
         <div className="mt-7 flex flex-wrap justify-center gap-3">
           <button
             type="button"
+            onClick={() => onSelectWindow('market-analysis')}
+            className="px-4 py-2.5 rounded-xl bg-[#D4AF37]/15 hover:bg-[#D4AF37]/25 border border-[#D4AF37]/35 text-xs font-semibold text-[#E5C76B] transition-colors whitespace-nowrap"
+          >
+            Watch Market Analysis
+          </button>
+          <button
+            type="button"
             onClick={() => onSelectWindow('videos')}
             className="px-4 py-2.5 rounded-xl bg-white/[0.06] hover:bg-white/[0.11] border border-white/10 text-xs font-semibold text-[#F5F5F7] transition-colors whitespace-nowrap"
           >

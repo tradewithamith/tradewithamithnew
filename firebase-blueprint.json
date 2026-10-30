@@ -81,6 +81,11 @@
           "type": "string",
           "enum": ["NONE", "PENDING", "APPROVED", "REJECTED"]
         },
+        "vipCategory": {
+          "type": "string",
+          "maxLength": 20,
+          "enum": ["NONE", "EXNESS", "BINANCE", "CUSTOM"]
+        },
         "vipExpiry": {
           "type": "string",
           "format": "date-time"
@@ -307,7 +312,7 @@
         },
         "coverUrl": {
           "type": "string",
-          "maxLength": 500
+          "maxLength": 180000
         },
         "pdfUrl": {
           "type": "string",
@@ -356,7 +361,7 @@
         },
         "coverUrl": {
           "type": "string",
-          "maxLength": 500
+          "maxLength": 180000
         },
         "price": {
           "type": "number"
@@ -642,6 +647,92 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["dayKey", "weekKey", "monthKey", "todayCount", "weekCount", "monthCount", "totalCount", "lastSessionId", "updatedAt"]
+    },
+    "MarketAnalysisVideo": {
+      "title": "MarketAnalysisVideo",
+      "description": "Unlisted or public YouTube market analysis video managed by Admin.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "youtubeUrl": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 500
+        },
+        "thumbnail": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "date": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "status": {
+          "type": "string",
+          "enum": ["ACTIVE", "INACTIVE"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "title", "youtubeUrl", "thumbnail", "description", "date", "status", "createdAt", "updatedAt"]
+    },
+    "MarketAnalysisReaction": {
+      "title": "MarketAnalysisReaction",
+      "description": "Per-user YouTube-style LIKE or DISLIKE reaction keyed by videoId_userId.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 260,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "videoId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "userId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "reaction": {
+          "type": "string",
+          "enum": ["LIKE", "DISLIKE"]
+        },
+        "status": {
+          "type": "string",
+          "enum": ["ACTIVE"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "videoId", "userId", "reaction", "status", "createdAt", "updatedAt"]
     }
   },
   "firestore": {
@@ -672,6 +763,14 @@
     "/videos/{videoId}": {
       "schema": "AcademyVideo",
       "description": "Educational video library items."
+    },
+    "/marketAnalysisVideos/{videoId}": {
+      "schema": "MarketAnalysisVideo",
+      "description": "Market Analysis unlisted and public YouTube video breakdowns."
+    },
+    "/marketAnalysisReactions/{reactionId}": {
+      "schema": "MarketAnalysisReaction",
+      "description": "Deterministic per-user Like and Dislike reactions on Market Analysis videos."
     },
     "/freeBooks/{bookId}": {
       "schema": "FreeBook",

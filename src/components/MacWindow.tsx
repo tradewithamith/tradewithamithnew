@@ -56,7 +56,7 @@ export const MacWindow: React.FC<MacWindowProps> = ({
   }
 
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (isMaximized) return;
+    if (!isDesktop || isMaximized) return;
     if ((e.target as HTMLElement).closest('button, a, input')) return;
     onFocus(id);
     e.currentTarget.setPointerCapture(e.pointerId);
@@ -95,17 +95,19 @@ export const MacWindow: React.FC<MacWindowProps> = ({
   return (
     <section
       aria-label={title}
-      onMouseDown={() => onFocus(id)}
+      onMouseDown={() => {
+        if (isDesktop) onFocus(id);
+      }}
       style={{ zIndex }}
       className={
         isMaximized
-          ? 'w-full lg:fixed lg:inset-x-4 lg:top-16 lg:bottom-24 lg:w-auto transition-opacity duration-150 pointer-events-none'
-          : 'w-full lg:fixed lg:inset-x-6 lg:top-[76px] lg:max-w-[1160px] lg:mx-auto transition-opacity duration-150 pointer-events-none'
+          ? 'w-full lg:fixed lg:inset-x-4 lg:top-16 lg:bottom-24 lg:w-auto transition-opacity duration-150 lg:pointer-events-none'
+          : 'w-full lg:fixed lg:inset-x-6 lg:top-[76px] lg:max-w-[1160px] lg:mx-auto transition-opacity duration-150 lg:pointer-events-none'
       }
     >
       <div
         style={{ transform: isDesktop ? desktopTransform : undefined }}
-        className={`pointer-events-auto apple-window rounded-2xl lg:rounded-[22px] overflow-hidden flex flex-col ${
+        className={`pointer-events-auto apple-window rounded-2xl lg:rounded-[22px] overflow-x-clip lg:overflow-hidden flex flex-col ${
           isMaximized ? 'lg:h-full' : 'lg:max-h-[calc(100vh-11rem)]'
         }`}
       >
@@ -164,8 +166,8 @@ export const MacWindow: React.FC<MacWindowProps> = ({
           <div className="flex items-center justify-end min-w-[72px]">{headerRight}</div>
         </div>
 
-        {/* Scrollable Window Body */}
-        <div className="flex-1 overflow-y-auto overscroll-contain">{children}</div>
+        {/* Scrollable Window Body (desktop internal scroll; mobile native document touch scroll) */}
+        <div className="flex-1 lg:overflow-y-auto lg:overscroll-contain">{children}</div>
       </div>
     </section>
   );

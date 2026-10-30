@@ -300,8 +300,9 @@ export function clampStr(val: string | undefined | null, maxLen: number, fallbac
 }
 
 /**
- * Configurable XAUUSD Pip Calculator
- * Example: Entry 4140 -> TP 4150 with pipMultiplier 10 => +100 PIPS
+ * Configurable XAUUSD Realized Pip Calculator
+ * Only settled signals (TP HIT, SL HIT, CLOSED) record realized pips.
+ * Active unsettled signals return 0 realized pips so statistics never show fake pips.
  */
 export function calculateSignalPips(params: {
   direction: SignalDirection;
@@ -310,9 +311,18 @@ export function calculateSignalPips(params: {
   sl: number;
   result: SignalResult;
   pipMultiplier: number;
+  customClosedPips?: number;
 }): number {
-  const { direction, entry, tp, sl, result, pipMultiplier } = params;
+  const { direction, entry, tp, sl, result, pipMultiplier, customClosedPips } = params;
   const mult = pipMultiplier > 0 ? pipMultiplier : 10;
+
+  if (result === 'ACTIVE') {
+    return 0;
+  }
+
+  if (result === 'CLOSED' && customClosedPips !== undefined && Number.isFinite(customClosedPips)) {
+    return Math.round(customClosedPips);
+  }
 
   if (!Number.isFinite(entry) || !Number.isFinite(tp) || !Number.isFinite(sl)) {
     return 0;
@@ -323,7 +333,24 @@ export function calculateSignalPips(params: {
     return -Math.round(lossDistance * mult);
   }
 
-  // For ACTIVE, TP HIT, or CLOSED (projected/realized primary target distance)
+  if (result === 'TP HIT') {
+    const rawMove = direction === 'BUY' ? tp - entry : entry - tp;
+    return Math.round(rawMove * mult);
+  }
+
+  // CLOSED without customClosedPips defaults to 0 (breakeven) unless explicitly set
+  return 0;
+}
+
+export function calculateTargetPips(params: {
+  direction: SignalDirection;
+  entry: number;
+  tp: number;
+  pipMultiplier: number;
+}): number {
+  const { direction, entry, tp, pipMultiplier } = params;
+  const mult = pipMultiplier > 0 ? pipMultiplier : 10;
+  if (!Number.isFinite(entry) || !Number.isFinite(tp)) return 0;
   const rawMove = direction === 'BUY' ? tp - entry : entry - tp;
   return Math.round(rawMove * mult);
 }

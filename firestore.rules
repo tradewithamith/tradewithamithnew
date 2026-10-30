@@ -86,11 +86,12 @@ service cloud.firestore {
 
     function isValidVipGrant(data) {
       return data.keys().hasAll(['userId', 'vipStatus', 'vipType', 'approvalStatus', 'vipExpiry', 'updatedAt']) &&
-        data.keys().hasOnly(['userId', 'vipStatus', 'vipType', 'approvalStatus', 'vipExpiry', 'updatedAt']) &&
+        data.keys().hasOnly(['userId', 'vipStatus', 'vipType', 'approvalStatus', 'vipCategory', 'vipExpiry', 'updatedAt']) &&
         isValidId(data.userId) &&
         data.vipStatus is string && data.vipStatus.size() <= 20 && data.vipStatus in ['NONE', 'ACTIVE', 'EXPIRED', 'REVOKED'] &&
         data.vipType is string && data.vipType.size() <= 20 && data.vipType in ['NONE', 'LIFETIME', 'MONTHLY', 'CUSTOM'] &&
         data.approvalStatus is string && data.approvalStatus.size() <= 20 && data.approvalStatus in ['NONE', 'PENDING', 'APPROVED', 'REJECTED'] &&
+        (!('vipCategory' in data) || (data.vipCategory is string && data.vipCategory.size() <= 20 && data.vipCategory in ['NONE', 'EXNESS', 'BINANCE', 'CUSTOM'])) &&
         data.vipExpiry is timestamp &&
         data.updatedAt is timestamp;
     }
@@ -154,13 +155,39 @@ service cloud.firestore {
         data.updatedAt is timestamp;
     }
 
+    function isValidMarketAnalysisVideo(data) {
+      return data.keys().hasAll(['id', 'title', 'youtubeUrl', 'thumbnail', 'description', 'date', 'status', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'title', 'youtubeUrl', 'thumbnail', 'description', 'date', 'status', 'createdAt', 'updatedAt']) &&
+        isValidId(data.id) &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 200 &&
+        data.youtubeUrl is string && data.youtubeUrl.size() >= 5 && data.youtubeUrl.size() <= 500 &&
+        data.thumbnail is string && data.thumbnail.size() <= 500 &&
+        data.description is string && data.description.size() <= 1000 &&
+        data.date is string && data.date.size() <= 40 &&
+        data.status is string && data.status.size() <= 20 && data.status in ['ACTIVE', 'INACTIVE'] &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidMarketAnalysisReaction(data) {
+      return data.keys().hasAll(['id', 'videoId', 'userId', 'reaction', 'status', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'videoId', 'userId', 'reaction', 'status', 'createdAt', 'updatedAt']) &&
+        isValidLongId(data.id) &&
+        isValidId(data.videoId) &&
+        isValidId(data.userId) &&
+        data.reaction is string && data.reaction.size() <= 16 && data.reaction in ['LIKE', 'DISLIKE'] &&
+        data.status is string && data.status.size() <= 16 && data.status == 'ACTIVE' &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
     function isValidFreeBook(data) {
       return data.keys().hasAll(['id', 'name', 'description', 'coverUrl', 'pdfUrl', 'views', 'downloads', 'status', 'createdAt', 'updatedAt']) &&
         data.keys().hasOnly(['id', 'name', 'description', 'coverUrl', 'pdfUrl', 'views', 'downloads', 'status', 'createdAt', 'updatedAt']) &&
         isValidId(data.id) &&
         data.name is string && data.name.size() >= 1 && data.name.size() <= 200 &&
         data.description is string && data.description.size() <= 1000 &&
-        data.coverUrl is string && data.coverUrl.size() <= 500 &&
+        data.coverUrl is string && data.coverUrl.size() <= 180000 &&
         data.pdfUrl is string && data.pdfUrl.size() >= 1 && data.pdfUrl.size() <= 500 &&
         data.views is number && data.views >= 0 &&
         data.downloads is number && data.downloads >= 0 &&
@@ -175,7 +202,7 @@ service cloud.firestore {
         isValidId(data.id) &&
         data.name is string && data.name.size() >= 1 && data.name.size() <= 200 &&
         data.description is string && data.description.size() <= 1000 &&
-        data.coverUrl is string && data.coverUrl.size() <= 500 &&
+        data.coverUrl is string && data.coverUrl.size() <= 180000 &&
         data.price is number && data.price >= 0 &&
         data.status is string && data.status.size() <= 20 && data.status in ['ACTIVE', 'INACTIVE'] &&
         data.createdAt is timestamp &&
@@ -365,7 +392,7 @@ service cloud.firestore {
       allow update: if isAdmin() && isValidId(userId) && isValidVipGrant(incoming()) &&
         incoming().userId == existing().userId &&
         incoming().updatedAt == request.time &&
-        incoming().diff(existing()).affectedKeys().hasOnly(['vipStatus', 'vipType', 'approvalStatus', 'vipExpiry', 'updatedAt']);
+        incoming().diff(existing()).affectedKeys().hasOnly(['vipStatus', 'vipType', 'approvalStatus', 'vipCategory', 'vipExpiry', 'updatedAt']);
       allow delete: if isAdmin() && isValidId(userId);
     }
 
@@ -435,6 +462,51 @@ service cloud.firestore {
         incoming().updatedAt == request.time &&
         incoming().diff(existing()).affectedKeys().hasOnly(['title', 'youtubeUrl', 'thumbnail', 'description', 'date', 'status', 'updatedAt']);
       allow delete: if isAdmin() && isValidId(videoId);
+    }
+
+    match /marketAnalysisVideos/{videoId} {
+      allow get: if isValidId(videoId) && ((resource != null && existing().status == 'ACTIVE') || isAdmin());
+      allow list: if resource.data.status == 'ACTIVE' || isBootstrappedAdmin();
+      allow create: if isAdmin() && isValidId(videoId) && isValidMarketAnalysisVideo(incoming()) &&
+        incoming().id == videoId &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isAdmin() && isValidId(videoId) && isValidMarketAnalysisVideo(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['title', 'youtubeUrl', 'thumbnail', 'description', 'date', 'status', 'updatedAt']);
+      allow delete: if isAdmin() && isValidId(videoId);
+    }
+
+    match /marketAnalysisReactions/{reactionId} {
+      allow get: if isValidLongId(reactionId) && (resource == null || existing().status == 'ACTIVE' || isAdmin());
+      allow list: if resource.data.status == 'ACTIVE' || isBootstrappedAdmin();
+      allow create: if isVerifiedUser() && isValidLongId(reactionId) && isValidMarketAnalysisReaction(incoming()) &&
+        incoming().id == reactionId &&
+        incoming().userId == request.auth.uid &&
+        reactionId == incoming().videoId + '_' + request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        exists(/databases/$(database)/documents/marketAnalysisVideos/$(incoming().videoId)) &&
+        get(/databases/$(database)/documents/marketAnalysisVideos/$(incoming().videoId)).data.status == 'ACTIVE';
+      allow update: if isVerifiedUser() && isValidLongId(reactionId) && isValidMarketAnalysisReaction(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().videoId == existing().videoId &&
+        incoming().userId == existing().userId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (
+          isAdmin() ||
+          (
+            request.auth.uid == existing().userId &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['reaction', 'updatedAt'])
+          )
+        );
+      allow delete: if isValidLongId(reactionId) && (
+        isAdmin() ||
+        (isVerifiedUser() && resource != null && existing().userId == request.auth.uid)
+      );
     }
 
     match /freeBooks/{bookId} {

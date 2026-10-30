@@ -304,6 +304,91 @@ async function startServer() {
     res.send(buffer);
   });
 
+  // 4. SSRF-safe external PDF binary proxy & attachment downloader for cover extraction & direct download
+  const isSafeExternalHttpUrl = (raw: string): URL | null => {
+    try {
+      const u = new URL(raw);
+      if (u.protocol !== 'https:' && u.protocol !== 'http:') return null;
+      const host = u.hostname.toLowerCase();
+      if (
+        host === 'localhost' ||
+        host === '127.0.0.1' ||
+        host === '0.0.0.0' ||
+        host === '::1' ||
+        host.endsWith('.local') ||
+        host.startsWith('10.') ||
+        host.startsWith('192.168.') ||
+        /^172\.(1[6-9]|2\d|3[0-1])\./.test(host) ||
+        host === '169.254.169.254'
+      ) {
+        return null;
+      }
+      return u;
+    } catch {
+      return null;
+    }
+  };
+
+  const handleExternalPdfFetch = async (req: Request, res: Response, asAttachment: boolean) => {
+    const rawUrl = String(req.query.url || '').trim();
+    const safeUrl = isSafeExternalHttpUrl(rawUrl);
+    if (!safeUrl) {
+      res.status(400).json({ error: 'Provide a valid public HTTP/HTTPS PDF URL.' });
+      return;
+    }
+
+    const rawFilename = String(req.query.filename || 'MSNR_Guide.pdf')
+      .replace(/[^a-zA-Z0-9._-]/g, '_')
+      .slice(0, 100);
+    const filename = rawFilename.toLowerCase().endsWith('.pdf')
+      ? rawFilename
+      : `${rawFilename}.pdf`;
+
+    try {
+      const upstream = await fetch(safeUrl.toString(), {
+        headers: {
+          'User-Agent': 'Mozilla/5.0',
+          Accept: 'application/pdf,application/octet-stream,*/*',
+        },
+        redirect: 'follow',
+      });
+      if (!upstream.ok) {
+        res.status(upstream.status).json({ error: `Upstream HTTP ${upstream.status}` });
+        return;
+      }
+
+      const contentLength = Number(upstream.headers.get('content-length') || '0');
+      if (contentLength > 40 * 1024 * 1024) {
+        res.status(413).json({ error: 'PDF exceeds 40MB proxy limit.' });
+        return;
+      }
+
+      const buf = Buffer.from(await upstream.arrayBuffer());
+      if (buf.byteLength > 40 * 1024 * 1024) {
+        res.status(413).json({ error: 'PDF exceeds 40MB proxy limit.' });
+        return;
+      }
+
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader(
+        'Content-Disposition',
+        `${asAttachment ? 'attachment' : 'inline'}; filename="${filename}"`
+      );
+      res.setHeader('Cache-Control', 'public, max-age=3600');
+      res.send(buf);
+    } catch {
+      res.status(502).json({ error: 'Failed to retrieve remote PDF.' });
+    }
+  };
+
+  app.get('/api/pdf/proxy', (req: Request, res: Response) => {
+    void handleExternalPdfFetch(req, res, false);
+  });
+
+  app.get('/api/pdf/download', (req: Request, res: Response) => {
+    void handleExternalPdfFetch(req, res, true);
+  });
+
   if (process.env.NODE_ENV !== 'production') {
     const { createServer: createViteServer } = await import('vite');
     const hmrDisabled = process.env.DISABLE_HMR === 'true';

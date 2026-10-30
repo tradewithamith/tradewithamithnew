@@ -7,15 +7,20 @@ import {
   Check,
   Copy,
   Crown,
+  Edit3,
   ExternalLink,
   FileText,
   FolderSync,
   LayoutDashboard,
+  LineChart,
+  Loader2,
   LogOut,
   PlaySquare,
   Plus,
   Settings,
   ShieldAlert,
+  ThumbsDown,
+  ThumbsUp,
   Trash2,
   Upload,
   Users,
@@ -56,21 +61,28 @@ import {
   normalizeYoutubeChannelId,
 } from '../lib/integrations';
 import {
+  extractPdfCoverFromFile,
+  extractPdfCoverFromUrl,
+} from '../lib/pdfTools';
+import {
   ASSETS,
+  LEGACY_DEMO_SIGNAL_IDS,
   STARTER_FREE_BOOKS,
   STARTER_PAID_BOOKS,
-  STARTER_SIGNALS_PUBLIC,
   STARTER_VIDEOS,
   type AcademySettings,
   type AcademyVideo,
   type AppNotification,
   type BookPurchaseItem,
   type FreeBook,
+  type MarketAnalysisReaction,
+  type MarketAnalysisVideo,
   type PaidBookPublic,
   type SignalDirection,
   type SignalOrderType,
   type SignalResult,
   type UserProfile,
+  type VipCategory,
   type VipGrant,
   type VipRequestItem,
   type VipSignalPrivate,
@@ -83,6 +95,7 @@ type AdminTab =
   | 'signals'
   | 'vip-requests'
   | 'book-purchases'
+  | 'market-analysis'
   | 'videos'
   | 'free-pdfs'
   | 'paid-pdfs'
@@ -116,12 +129,23 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
   const [privSignals, setPrivSignals] = useState<Record<string, VipSignalPrivate>>({});
   const [vipRequests, setVipRequests] = useState<VipRequestItem[]>([]);
   const [bookPurchases, setBookPurchases] = useState<BookPurchaseItem[]>([]);
+  const [allMarketVideos, setAllMarketVideos] = useState<MarketAnalysisVideo[]>([]);
+  const [allMarketReactions, setAllMarketReactions] = useState<MarketAnalysisReaction[]>([]);
   const [allVideos, setAllVideos] = useState<AcademyVideo[]>([]);
   const [allFreeBooks, setAllFreeBooks] = useState<FreeBook[]>([]);
   const [allPaidBooks, setAllPaidBooks] = useState<PaidBookPublic[]>([]);
   const [allUsers, setAllUsers] = useState<UserProfile[]>([]);
   const [allGrants, setAllGrants] = useState<Record<string, VipGrant>>({});
   const [allNotifs, setAllNotifs] = useState<AppNotification[]>([]);
+
+  // VIP Category Filters (Exness VIP Users vs Binance VIP Users)
+  const [vipRequestCategoryFilter, setVipRequestCategoryFilter] = useState<
+    'EXNESS' | 'BINANCE' | 'CUSTOM' | 'ALL'
+  >('EXNESS');
+  const [vipUsersCategoryTab, setVipUsersCategoryTab] = useState<'EXNESS' | 'BINANCE' | 'ALL'>(
+    'EXNESS'
+  );
+  const [memberSearch, setMemberSearch] = useState('');
 
   // Signal Form State
   const [editingSignalId, setEditingSignalId] = useState<string | null>(null);
@@ -133,26 +157,47 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
   const [sigExtraTp, setSigExtraTp] = useState('4160');
   const [sigSl, setSigSl] = useState('4128');
   const [sigResult, setSigResult] = useState<SignalResult>('ACTIVE');
+  const [sigClosedPips, setSigClosedPips] = useState('0');
   const [sigNote, setSigNote] = useState('Wait for M15 candlestick confirmation before entry.');
+  const [closingSignalModal, setClosingSignalModal] = useState<{
+    signal: VipSignalPublic;
+    pipsInput: string;
+  } | null>(null);
+
+  // Market Analysis Video Form State
+  const [editingMaId, setEditingMaId] = useState<string | null>(null);
+  const [maTitle, setMaTitle] = useState('');
+  const [maUrl, setMaUrl] = useState('');
+  const [maThumb, setMaThumb] = useState('');
+  const [maDate, setMaDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [maStatus, setMaStatus] = useState<'ACTIVE' | 'INACTIVE'>('ACTIVE');
+  const [maDesc, setMaDesc] = useState('');
 
   // Video Form State
+  const [editingVidId, setEditingVidId] = useState<string | null>(null);
   const [vidTitle, setVidTitle] = useState('');
   const [vidUrl, setVidUrl] = useState('');
   const [vidThumb, setVidThumb] = useState('');
+  const [vidDate, setVidDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [vidStatus, setVidStatus] = useState<'ACTIVE' | 'INACTIVE'>('ACTIVE');
   const [vidDesc, setVidDesc] = useState('');
 
-  // Free Book Form State
+  // Free Book Form State (Cover automatically extracted from PDF!)
+  const [editingFbId, setEditingFbId] = useState<string | null>(null);
   const [fbName, setFbName] = useState('');
   const [fbDesc, setFbDesc] = useState('');
   const [fbCover, setFbCover] = useState('');
   const [fbPdf, setFbPdf] = useState('');
+  const [fbExtractingCover, setFbExtractingCover] = useState(false);
 
-  // Paid Book Form State
+  // Paid Book Form State (Cover automatically extracted from PDF!)
+  const [editingPbId, setEditingPbId] = useState<string | null>(null);
   const [pbName, setPbName] = useState('');
   const [pbDesc, setPbDesc] = useState('');
   const [pbPrice, setPbPrice] = useState('29');
   const [pbCover, setPbCover] = useState('');
   const [pbPdf, setPbPdf] = useState('');
+  const [pbExtractingCover, setPbExtractingCover] = useState(false);
 
   // Notification Form State
   const [notifTitle, setNotifTitle] = useState('');
@@ -358,6 +403,7 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
             vipStatus: r.vipStatus,
             vipType: r.vipType,
             approvalStatus: r.approvalStatus,
+            vipCategory: (r.vipCategory as VipCategory | undefined) || undefined,
             vipExpiryMs: tsMs(r.vipExpiry),
           };
         });
@@ -389,6 +435,48 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
       (e) => handleFirestoreError(e, OperationType.LIST, 'notifications')
     );
 
+    const u11 = onSnapshot(
+      collection(db, 'marketAnalysisVideos'),
+      (snap) => {
+        const list: MarketAnalysisVideo[] = [];
+        snap.forEach((d) => {
+          const r = d.data();
+          list.push({
+            id: d.id,
+            title: r.title,
+            youtubeUrl: r.youtubeUrl,
+            thumbnail: r.thumbnail,
+            description: r.description,
+            date: r.date,
+            status: r.status,
+            createdAtMs: tsMs(r.createdAt),
+          });
+        });
+        setAllMarketVideos(list.sort((a, b) => b.createdAtMs - a.createdAtMs));
+      },
+      (e) => handleFirestoreError(e, OperationType.LIST, 'marketAnalysisVideos')
+    );
+
+    const u12 = onSnapshot(
+      collection(db, 'marketAnalysisReactions'),
+      (snap) => {
+        const list: MarketAnalysisReaction[] = [];
+        snap.forEach((d) => {
+          const r = d.data();
+          list.push({
+            id: d.id,
+            videoId: r.videoId,
+            userId: r.userId,
+            reaction: r.reaction,
+            status: 'ACTIVE',
+            createdAtMs: tsMs(r.createdAt),
+          });
+        });
+        setAllMarketReactions(list);
+      },
+      (e) => handleFirestoreError(e, OperationType.LIST, 'marketAnalysisReactions')
+    );
+
     return () => {
       u1();
       u2();
@@ -400,20 +488,84 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
       u8();
       u9();
       u10();
+      u11();
+      u12();
     };
   }, [user, isAdmin]);
+
+  // Automatically extract Page-1 cover whenever Admin pastes/changes Free PDF URL
+  useEffect(() => {
+    const trimmed = fbPdf.trim();
+    if (!trimmed || (fbCover && fbCover.startsWith('data:image/'))) return;
+    let active = true;
+    const timer = window.setTimeout(() => {
+      setFbExtractingCover(true);
+      extractPdfCoverFromUrl(trimmed)
+        .then((rendered) => {
+          if (active && rendered) {
+            setFbCover(rendered);
+          }
+        })
+        .finally(() => {
+          if (active) setFbExtractingCover(false);
+        });
+    }, 450);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [fbPdf, fbCover]);
+
+  // Automatically extract Page-1 cover whenever Admin pastes/changes Paid PDF URL
+  useEffect(() => {
+    const trimmed = pbPdf.trim();
+    if (!trimmed || (pbCover && pbCover.startsWith('data:image/'))) return;
+    let active = true;
+    const timer = window.setTimeout(() => {
+      setPbExtractingCover(true);
+      extractPdfCoverFromUrl(trimmed)
+        .then((rendered) => {
+          if (active && rendered) {
+            setPbCover(rendered);
+          }
+        })
+        .finally(() => {
+          if (active) setPbExtractingCover(false);
+        });
+    }, 450);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [pbPdf, pbCover]);
 
   // --- Admin Helper: Upload File to Firebase Storage ---
   const handleStorageUpload = async (
     file: File,
     folder: string,
-    onUrl: (url: string) => void
+    onUrl: (url: string) => void,
+    onExtractedCover?: (coverDataUrl: string) => void
   ) => {
     setUploadingField(folder);
     try {
+      if (file.type === 'application/pdf' && onExtractedCover) {
+        extractPdfCoverFromFile(file).then((coverDataUrl) => {
+          if (coverDataUrl) {
+            onExtractedCover(coverDataUrl);
+          }
+        });
+      }
+
       const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
       const storageRef = ref(storage, `academy/${folder}/${Date.now()}_${safeName}`);
-      await uploadBytes(storageRef, file);
+      const metadata =
+        file.type === 'application/pdf'
+          ? {
+              contentType: 'application/pdf',
+              contentDisposition: `attachment; filename="${safeName}"`,
+            }
+          : undefined;
+      await uploadBytes(storageRef, file, metadata);
       const downloadUrl = await getDownloadURL(storageRef);
       onUrl(downloadUrl);
       showToast('ok', `Uploaded ${file.name} to Firebase Storage.`);
@@ -429,7 +581,7 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
     }
   };
 
-  // --- Seed Starter Catalog Into Live Firestore ---
+  // --- Seed Starter Catalog Into Live Firestore (Videos & PDFs ONLY — NEVER Fake Signals!) ---
   const handleInitializeStarterData = async () => {
     try {
       const batch = writeBatch(db);
@@ -437,31 +589,6 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
       if (!settingsSnap.exists()) {
         batch.set(doc(db, 'settings', 'config'), {
           ...settings,
-          updatedAt: serverTimestamp(),
-        });
-      }
-
-      for (const sig of STARTER_SIGNALS_PUBLIC.slice(0, 3)) {
-        batch.set(doc(db, 'vipSignalsPublic', sig.id), {
-          id: sig.id,
-          date: sig.date,
-          currency: 'XAUUSD',
-          direction: sig.direction,
-          orderType: sig.orderType,
-          result: sig.result,
-          pips: sig.pips,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        });
-        batch.set(doc(db, 'vipSignalsPrivate', sig.id), {
-          id: sig.id,
-          currency: 'XAUUSD',
-          entry: 4140,
-          tp: 4150,
-          extraTp: 4160,
-          sl: 4128,
-          note: 'Wait for M15 confirmation candle at fresh H4 MSNR level.',
-          createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         });
       }
@@ -481,11 +608,12 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
       }
 
       for (const fb of STARTER_FREE_BOOKS) {
+        const autoCover = (await extractPdfCoverFromUrl(fb.pdfUrl)) || '';
         batch.set(doc(db, 'freeBooks', fb.id), {
           id: fb.id,
           name: fb.name,
           description: fb.description,
-          coverUrl: fb.coverUrl,
+          coverUrl: clampStr(autoCover || fb.coverUrl, 175000),
           pdfUrl: fb.pdfUrl,
           views: fb.views,
           downloads: fb.downloads,
@@ -496,11 +624,16 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
       }
 
       for (const pb of STARTER_PAID_BOOKS) {
+        const sampleProtectedUrl =
+          pb.id === 'paid_msnr_playbook'
+            ? '/api/sample-pdf/msnr-masterbook-pro'
+            : '/api/sample-pdf/xauusd-liquidity-atlas';
+        const autoCover = (await extractPdfCoverFromUrl(sampleProtectedUrl)) || pb.coverUrl;
         batch.set(doc(db, 'paidBooksPublic', pb.id), {
           id: pb.id,
           name: pb.name,
           description: pb.description,
-          coverUrl: pb.coverUrl,
+          coverUrl: clampStr(autoCover, 175000),
           price: pb.price,
           status: 'ACTIVE',
           createdAt: serverTimestamp(),
@@ -508,16 +641,13 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
         });
         batch.set(doc(db, 'paidBooksProtected', pb.id), {
           id: pb.id,
-          pdfUrl:
-            pb.id === 'paid_msnr_playbook'
-              ? '/api/sample-pdf/msnr-masterbook-pro'
-              : '/api/sample-pdf/xauusd-liquidity-atlas',
+          pdfUrl: sampleProtectedUrl,
           updatedAt: serverTimestamp(),
         });
       }
 
       await batch.commit();
-      showToast('ok', 'Starter signals, videos, and PDFs published to Firestore.');
+      showToast('ok', 'Starter videos and PDFs synced (zero fake signals added).');
     } catch (err) {
       showToast('err', err instanceof Error ? err.message : 'Initialization failed.');
     }
@@ -530,6 +660,7 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
     const tpNum = Number(sigTp);
     const extraTpNum = Number(sigExtraTp || sigTp);
     const slNum = Number(sigSl);
+    const closedPipsNum = Number(sigClosedPips || '0');
 
     if (!Number.isFinite(entryNum) || !Number.isFinite(tpNum) || !Number.isFinite(slNum)) {
       showToast('err', 'Entry, TP, and SL must be valid numbers.');
@@ -543,6 +674,7 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
       sl: slNum,
       result: sigResult,
       pipMultiplier: settings.pipMultiplier,
+      customClosedPips: sigResult === 'CLOSED' ? closedPipsNum : undefined,
     });
 
     try {
@@ -593,24 +725,43 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
 
       await batch.commit();
       setEditingSignalId(null);
+      setSigResult('ACTIVE');
+      setSigClosedPips('0');
       showToast('ok', editingSignalId ? 'Signal updated.' : 'New XAUUSD VIP signal published.');
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, 'vipSignalsPublic');
     }
   };
 
-  const handleMarkSignalOutcome = async (sig: VipSignalPublic, outcome: SignalResult) => {
+  const handleMarkSignalOutcome = async (
+    sig: VipSignalPublic,
+    outcome: SignalResult,
+    explicitClosedPips?: number
+  ) => {
+    if (outcome === 'CLOSED' && explicitClosedPips === undefined) {
+      setClosingSignalModal({
+        signal: sig,
+        pipsInput: sig.result === 'CLOSED' ? String(sig.pips || 0) : '0',
+      });
+      return;
+    }
+
     const priv = privSignals[sig.id];
-    const pips = priv
-      ? calculateSignalPips({
-          direction: sig.direction,
-          entry: priv.entry,
-          tp: priv.tp,
-          sl: priv.sl,
-          result: outcome,
-          pipMultiplier: settings.pipMultiplier,
-        })
-      : sig.pips;
+    const pips =
+      outcome === 'CLOSED'
+        ? Math.round(Number(explicitClosedPips) || 0)
+        : priv
+        ? calculateSignalPips({
+            direction: sig.direction,
+            entry: priv.entry,
+            tp: priv.tp,
+            sl: priv.sl,
+            result: outcome,
+            pipMultiplier: settings.pipMultiplier,
+          })
+        : outcome === 'ACTIVE'
+        ? 0
+        : sig.pips;
 
     try {
       await updateDoc(doc(db, 'vipSignalsPublic', sig.id), {
@@ -618,13 +769,32 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
         pips,
         updatedAt: serverTimestamp(),
       });
-      showToast('ok', `Marked signal ${sig.id} as ${outcome} (${pips >= 0 ? '+' : ''}${pips} pips).`);
+      showToast(
+        'ok',
+        `Marked signal as ${outcome} (${pips > 0 ? '+' : ''}${pips} pips).`
+      );
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `vipSignalsPublic/${sig.id}`);
     }
   };
 
-  // --- VIP Request Approval / Rejection ---
+  const handleRemoveLegacyDemoSignals = async () => {
+    const legacy = pubSignals.filter((s) => LEGACY_DEMO_SIGNAL_IDS.has(s.id));
+    if (legacy.length === 0) return;
+    try {
+      const b = writeBatch(db);
+      for (const s of legacy) {
+        b.delete(doc(db, 'vipSignalsPublic', s.id));
+        b.delete(doc(db, 'vipSignalsPrivate', s.id));
+      }
+      await b.commit();
+      showToast('ok', `Removed ${legacy.length} legacy demo signals from Firestore.`);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, 'vipSignalsPublic');
+    }
+  };
+
+  // --- VIP Request Approval / Rejection (Preserving Separate Exness vs Binance VIP Category) ---
   const handleVipDecision = async (req: VipRequestItem, decision: 'APPROVED' | 'REJECTED') => {
     try {
       const batch = writeBatch(db);
@@ -636,6 +806,7 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
       if (decision === 'APPROVED') {
         const isLifetime = req.method === 'EXNESS';
         const vipType = isLifetime ? 'LIFETIME' : req.method === 'BINANCE' ? 'MONTHLY' : 'CUSTOM';
+        const vipCategory: VipCategory = req.method;
         const expiryDate = isLifetime
           ? new Date('2099-12-31T23:59:59Z')
           : new Date(Date.now() + 30 * 86_400_000);
@@ -647,6 +818,7 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
           vipStatus: 'ACTIVE',
           vipType,
           approvalStatus: 'APPROVED',
+          vipCategory,
           vipExpiry: Timestamp.fromDate(expiryDate),
           updatedAt: serverTimestamp(),
         };
@@ -655,6 +827,7 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
             vipStatus: 'ACTIVE',
             vipType,
             approvalStatus: 'APPROVED',
+            vipCategory,
             vipExpiry: Timestamp.fromDate(expiryDate),
             updatedAt: serverTimestamp(),
           });
@@ -673,7 +846,7 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
           decision === 'APPROVED'
             ? req.method === 'EXNESS'
               ? 'Your Exness Lifetime VIP access is now active. Open VIP Signals to view full XAUUSD setups.'
-              : 'Your 30-day Monthly VIP access is now active. Open VIP Signals to view full XAUUSD setups.'
+              : 'Your Binance 30-day Monthly VIP access is now active. Open VIP Signals to view full XAUUSD setups.'
             : 'Your VIP verification request could not be confirmed. Contact our Telegram desk for assistance.',
         icon: 'crown',
         buttonText: decision === 'APPROVED' ? 'Open VIP Signals' : 'Contact Support',
@@ -684,7 +857,7 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
       });
 
       await batch.commit();
-      showToast('ok', `VIP request ${decision.toLowerCase()} and member notified.`);
+      showToast('ok', `${req.method} VIP request ${decision.toLowerCase()} and member notified.`);
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `vipRequests/${req.id}`);
     }
@@ -746,32 +919,56 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
     }
   };
 
-  // --- User Direct VIP Management ---
+  const resolveUserVipCategory = (uid: string): VipCategory => {
+    const grant = allGrants[uid];
+    if (grant?.vipCategory && grant.vipCategory !== 'NONE') {
+      return grant.vipCategory;
+    }
+    const matchingReq = vipRequests.find((r) => r.userId === uid && r.status === 'APPROVED');
+    if (matchingReq) return matchingReq.method;
+    const latestReq = vipRequests.find((r) => r.userId === uid);
+    if (latestReq && grant?.vipStatus === 'ACTIVE') return latestReq.method;
+    if (grant?.vipType === 'LIFETIME') return 'EXNESS';
+    if (grant?.vipType === 'MONTHLY') return 'BINANCE';
+    if (grant?.vipType === 'CUSTOM') return 'CUSTOM';
+    return 'NONE';
+  };
+
+  // --- User Direct VIP Management (Exness VIP vs Binance VIP) ---
   const handleManualUserVip = async (
     targetUid: string,
-    mode: 'LIFETIME' | 'EXTEND_30D' | 'REVOKE'
+    mode: 'EXNESS_LIFETIME' | 'BINANCE_30D' | 'REVOKE'
   ) => {
     try {
       const grantRef = doc(db, 'vipGrants', targetUid);
       const snap = await getDoc(grantRef);
+      const existingCat = resolveUserVipCategory(targetUid);
 
       const expiry =
-        mode === 'LIFETIME'
+        mode === 'EXNESS_LIFETIME'
           ? new Date('2099-12-31T23:59:59Z')
-          : mode === 'EXTEND_30D'
+          : mode === 'BINANCE_30D'
           ? new Date(Math.max(Date.now(), allGrants[targetUid]?.vipExpiryMs || 0) + 30 * 86_400_000)
           : new Date(Date.now() - 60_000);
+
+      const vipCategory: VipCategory =
+        mode === 'EXNESS_LIFETIME'
+          ? 'EXNESS'
+          : mode === 'BINANCE_30D'
+          ? 'BINANCE'
+          : existingCat;
 
       const nextData = {
         userId: targetUid,
         vipStatus: mode === 'REVOKE' ? ('REVOKED' as const) : ('ACTIVE' as const),
         vipType:
-          mode === 'LIFETIME'
+          mode === 'EXNESS_LIFETIME'
             ? ('LIFETIME' as const)
-            : mode === 'EXTEND_30D'
+            : mode === 'BINANCE_30D'
             ? ('MONTHLY' as const)
             : ('NONE' as const),
         approvalStatus: mode === 'REVOKE' ? ('REJECTED' as const) : ('APPROVED' as const),
+        vipCategory,
         vipExpiry: Timestamp.fromDate(expiry),
         updatedAt: serverTimestamp(),
       };
@@ -781,13 +978,21 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
           vipStatus: nextData.vipStatus,
           vipType: nextData.vipType,
           approvalStatus: nextData.approvalStatus,
+          vipCategory: nextData.vipCategory,
           vipExpiry: nextData.vipExpiry,
           updatedAt: serverTimestamp(),
         });
       } else {
         await setDoc(grantRef, nextData);
       }
-      showToast('ok', `Updated VIP grant (${mode}) for user.`);
+      showToast(
+        'ok',
+        mode === 'EXNESS_LIFETIME'
+          ? 'Granted Exness Lifetime VIP.'
+          : mode === 'BINANCE_30D'
+          ? 'Granted / Extended Binance 30-Day VIP.'
+          : 'Revoked VIP access.'
+      );
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `vipGrants/${targetUid}`);
     }
@@ -807,7 +1012,6 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
         kind === 'videos' ? 'Videos' : kind === 'free-pdfs' ? 'FreePDFs' : 'PaidPDFs';
 
       if (draftSettings.sheetsSpreadsheetId && !publishedCsvUrl) {
-        // Ensure Google Sheets read-only token is active
         await signInWithGoogle({ includeSheetsScope: true });
       }
 
@@ -853,11 +1057,13 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
           const pdfUrl = clampStr(r.pdf_url || r.pdfurl, 500);
           if (!pdfUrl) continue;
           const status = (r.status || 'ACTIVE').toUpperCase() === 'INACTIVE' ? 'INACTIVE' : 'ACTIVE';
+          const autoCover =
+            r.cover_url || r.coverurl || (await extractPdfCoverFromUrl(pdfUrl)) || '';
           batch.set(doc(db, 'freeBooks', id), {
             id,
             name: clampStr(r.name, 200, 'MSNR Guide'),
             description: clampStr(r.description, 1000),
-            coverUrl: clampStr(r.cover_url || r.coverurl || ASSETS.bookMsnr, 500),
+            coverUrl: clampStr(autoCover, 175000),
             pdfUrl,
             views: 0,
             downloads: 0,
@@ -873,11 +1079,13 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
           const pdfUrl = clampStr(r.pdf_url || r.pdfurl, 500);
           if (!pdfUrl) continue;
           const status = (r.status || 'ACTIVE').toUpperCase() === 'INACTIVE' ? 'INACTIVE' : 'ACTIVE';
+          const autoCover =
+            r.cover_url || r.coverurl || (await extractPdfCoverFromUrl(pdfUrl)) || ASSETS.bookXauusd;
           batch.set(doc(db, 'paidBooksPublic', id), {
             id,
             name: clampStr(r.name, 200, 'Premium MSNR Book'),
             description: clampStr(r.description, 1000),
-            coverUrl: clampStr(r.cover_url || r.coverurl || ASSETS.bookXauusd, 500),
+            coverUrl: clampStr(autoCover, 175000),
             price: Math.max(0, Number(r.price) || 29),
             status,
             createdAt: serverTimestamp(),
@@ -1165,24 +1373,29 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
       badge: vipRequests.filter((r) => r.status === 'PENDING').length,
     },
     {
+      id: 'users',
+      label: 'VIP Users',
+      icon: Users,
+    },
+    { id: 'market-analysis', label: 'Market Analysis', icon: LineChart },
+    { id: 'videos', label: 'Videos', icon: PlaySquare },
+    { id: 'free-pdfs', label: 'Free PDFs', icon: FileText },
+    { id: 'paid-pdfs', label: 'Paid PDFs', icon: BookOpen },
+    {
       id: 'book-purchases',
       label: 'Book Purchases',
       icon: BookOpen,
       badge: bookPurchases.filter((b) => b.status === 'PENDING').length,
     },
-    { id: 'videos', label: 'Videos', icon: PlaySquare },
-    { id: 'free-pdfs', label: 'Free PDFs', icon: FileText },
-    { id: 'paid-pdfs', label: 'Paid PDFs', icon: BookOpen },
-    { id: 'users', label: 'Users', icon: Users },
     { id: 'notifications', label: 'Notifications', icon: Bell },
     { id: 'statistics', label: 'Statistics', icon: BarChart3 },
     { id: 'settings', label: 'Settings', icon: Settings },
   ];
 
   return (
-    <div className="min-h-screen bg-[#070709] text-[#F5F5F7] flex flex-col lg:flex-row">
+    <div className="min-h-screen lg:h-screen lg:overflow-hidden bg-[#070709] text-[#F5F5F7] flex flex-col lg:flex-row">
       {/* macOS Sidebar */}
-      <aside className="w-full lg:w-64 apple-glass border-b lg:border-b-0 lg:border-r border-white/[0.08] p-4 flex flex-col justify-between shrink-0">
+      <aside className="w-full lg:w-64 apple-glass border-b lg:border-b-0 lg:border-r border-white/[0.08] p-4 flex flex-col justify-between shrink-0 lg:overflow-y-auto">
         <div className="space-y-5">
           <div className="flex items-center justify-between px-2">
             <a href="./index.html" onClick={handleReturnClick} className="flex items-center gap-2.5">
@@ -1249,8 +1462,8 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
         </div>
       </aside>
 
-      {/* Main Workspace */}
-      <main className="flex-1 min-w-0 p-5 sm:p-8 lg:p-10 space-y-8 overflow-y-auto">
+      {/* Main Workspace (native document touch scroll on mobile; independent pane scroll on desktop) */}
+      <main className="flex-1 min-w-0 p-5 sm:p-8 lg:p-10 space-y-8 lg:overflow-y-auto">
         {toast && (
           <div
             className={`p-3.5 rounded-xl text-xs font-medium border ${
@@ -1298,7 +1511,9 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
               </div>
               <div className="apple-surface rounded-2xl p-5">
                 <p className="text-xs font-sans text-[#A1A1AA]">Published Signals</p>
-                <p className="mt-2 text-2xl font-semibold text-[#F5F5F7]">{pubSignals.length}</p>
+                <p className="mt-2 text-2xl font-semibold text-[#F5F5F7]">
+                  {pubSignals.filter((s) => !LEGACY_DEMO_SIGNAL_IDS.has(s.id)).length}
+                </p>
               </div>
               <div className="apple-surface rounded-2xl p-5">
                 <p className="text-xs font-sans text-[#A1A1AA]">Registered Members</p>
@@ -1340,7 +1555,24 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
         {/* 2. VIP SIGNALS */}
         {activeTab === 'signals' && (
           <div className="space-y-8">
-            <h1 className="text-2xl font-semibold">Manage XAUUSD VIP Signals</h1>
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div>
+                <h1 className="text-2xl font-semibold">Manage XAUUSD VIP Signals</h1>
+                <p className="text-xs text-[#A1A1AA]">
+                  Pips are ONLY counted when you publish and settle real trading signals (TP HIT, SL HIT, or CLOSED).
+                </p>
+              </div>
+
+              {pubSignals.some((s) => LEGACY_DEMO_SIGNAL_IDS.has(s.id)) && (
+                <button
+                  type="button"
+                  onClick={handleRemoveLegacyDemoSignals}
+                  className="px-4 py-2 rounded-xl bg-[#FF453A]/20 hover:bg-[#FF453A]/30 border border-[#FF453A]/40 text-xs font-semibold text-[#FF453A]"
+                >
+                  Remove Legacy Demo Signals From Database
+                </button>
+              )}
+            </div>
 
             <form onSubmit={handleSaveSignal} className="apple-surface rounded-2xl p-6 space-y-4">
               <div className="flex items-center justify-between">
@@ -1350,7 +1582,11 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
                 {editingSignalId && (
                   <button
                     type="button"
-                    onClick={() => setEditingSignalId(null)}
+                    onClick={() => {
+                      setEditingSignalId(null);
+                      setSigResult('ACTIVE');
+                      setSigClosedPips('0');
+                    }}
                     className="text-xs text-[#A1A1AA] hover:text-[#F5F5F7]"
                   >
                     Cancel Edit
@@ -1397,10 +1633,10 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
                     onChange={(e) => setSigResult(e.target.value as SignalResult)}
                     className="w-full px-3 py-2 rounded-xl bg-[#14151B] border border-white/10 text-sm"
                   >
-                    <option value="ACTIVE">ACTIVE</option>
+                    <option value="ACTIVE">ACTIVE (Running · 0 Realized Pips)</option>
                     <option value="TP HIT">TP HIT</option>
                     <option value="SL HIT">SL HIT</option>
-                    <option value="CLOSED">CLOSED</option>
+                    <option value="CLOSED">CLOSED (Manual Exit)</option>
                   </select>
                 </div>
               </div>
@@ -1452,6 +1688,21 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
                 </div>
               </div>
 
+              {sigResult === 'CLOSED' && (
+                <div>
+                  <label className="block text-xs text-[#E5C76B] mb-1">
+                    Realized Pips on Manual Close (e.g. 45, 0 for breakeven, or -20)
+                  </label>
+                  <input
+                    type="number"
+                    step="1"
+                    value={sigClosedPips}
+                    onChange={(e) => setSigClosedPips(e.target.value)}
+                    className="w-full sm:w-64 px-3.5 py-2 rounded-xl bg-white/[0.04] border border-[#D4AF37]/40 text-sm font-mono"
+                  />
+                </div>
+              )}
+
               <div>
                 <label className="block text-xs text-[#A1A1AA] mb-1">Execution Note</label>
                 <input
@@ -1472,156 +1723,255 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
               </button>
             </form>
 
-            <div className="space-y-3">
-              {pubSignals.map((s) => {
-                const priv = privSignals[s.id];
-                return (
-                  <div
-                    key={s.id}
-                    className="apple-surface rounded-2xl p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4"
-                  >
-                    <div className="space-y-1 font-mono tabular-nums text-xs">
-                      <div className="flex items-center gap-2 font-sans">
-                        <span className="font-semibold text-sm text-[#F5F5F7]">{s.currency}</span>
-                        <span
-                          className={`font-semibold ${
-                            s.direction === 'BUY' ? 'text-[#30D158]' : 'text-[#FF453A]'
-                          }`}
-                        >
-                          {s.direction} {s.orderType}
-                        </span>
-                        <span className="text-[#8E8E93]">· {s.date} · {s.result}</span>
-                      </div>
-                      <p className="text-[#D1D1D6]">
-                        Entry: {priv?.entry ?? '—'} · TP: {priv?.tp ?? '—'} · Extra TP:{' '}
-                        {priv?.extraTp ?? '—'} · SL: {priv?.sl ?? '—'} · Pips: {s.pips}
-                      </p>
-                      {priv?.note && <p className="font-sans text-[#8E8E93]">{priv.note}</p>}
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => handleMarkSignalOutcome(s, 'TP HIT')}
-                        className="px-2.5 py-1.5 rounded-lg bg-[#30D158]/15 text-[#30D158] text-xs font-semibold"
-                      >
-                        TP HIT
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleMarkSignalOutcome(s, 'SL HIT')}
-                        className="px-2.5 py-1.5 rounded-lg bg-[#FF453A]/15 text-[#FF453A] text-xs font-semibold"
-                      >
-                        SL HIT
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleMarkSignalOutcome(s, 'CLOSED')}
-                        className="px-2.5 py-1.5 rounded-lg bg-white/10 text-[#F5F5F7] text-xs font-semibold"
-                      >
-                        CLOSED
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setEditingSignalId(s.id);
-                          setSigDate(s.date);
-                          setSigDirection(s.direction);
-                          setSigOrderType(s.orderType);
-                          setSigResult(s.result);
-                          if (priv) {
-                            setSigEntry(String(priv.entry));
-                            setSigTp(String(priv.tp));
-                            setSigExtraTp(String(priv.extraTp));
-                            setSigSl(String(priv.sl));
-                            setSigNote(priv.note);
-                          }
-                        }}
-                        className="px-2.5 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-xs text-[#D1D1D6]"
-                      >
-                        Edit
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setConfirmAction({
-                            title: 'Delete VIP Signal?',
-                            description: `Permanently delete ${s.currency} ${s.direction} signal (${s.date})?`,
-                            onConfirm: async () => {
-                              const b = writeBatch(db);
-                              b.delete(doc(db, 'vipSignalsPublic', s.id));
-                              b.delete(doc(db, 'vipSignalsPrivate', s.id));
-                              await b.commit();
-                              showToast('ok', 'Signal deleted.');
-                            },
-                          })
-                        }
-                        className="p-1.5 rounded-lg text-[#FF453A] hover:bg-[#FF453A]/15"
-                        aria-label="Delete signal"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* 3. VIP REQUESTS */}
-        {activeTab === 'vip-requests' && (
-          <div className="space-y-6">
-            <h1 className="text-2xl font-semibold">VIP Verification Requests</h1>
-            {vipRequests.length === 0 ? (
+            {pubSignals.filter((s) => !LEGACY_DEMO_SIGNAL_IDS.has(s.id)).length === 0 ? (
               <div className="apple-surface rounded-2xl p-10 text-center text-sm text-[#A1A1AA]">
-                No VIP requests submitted yet.
+                No trading signals published yet. Publish your first XAUUSD signal above.
               </div>
             ) : (
               <div className="space-y-3">
-                {vipRequests.map((req) => (
-                  <div
-                    key={req.id}
-                    className="apple-surface rounded-2xl p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4"
-                  >
-                    <div className="space-y-1 text-xs">
-                      <p className="text-sm font-semibold text-[#F5F5F7]">
-                        {req.name} · <span className="text-[#D4AF37]">{req.method}</span> ·{' '}
-                        <span>{req.status}</span>
-                      </p>
-                      <p className="text-[#A1A1AA]">
-                        Email: {req.email} · Telegram: {req.telegram}
-                      </p>
-                      <p className="font-mono text-[#D1D1D6]">
-                        {req.method === 'EXNESS' && `Exness ID: ${req.exnessId}`}
-                        {req.method === 'BINANCE' && `Transaction ID: ${req.transactionId}`}
-                        {req.method === 'CUSTOM' && `Details: ${req.customDetails}`}
-                        {' · '}
-                        {new Date(req.createdAtMs).toLocaleDateString()}
-                      </p>
-                    </div>
+                {pubSignals
+                  .filter((s) => !LEGACY_DEMO_SIGNAL_IDS.has(s.id))
+                  .map((s) => {
+                    const priv = privSignals[s.id];
+                    return (
+                      <div
+                        key={s.id}
+                        className="apple-surface rounded-2xl p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4"
+                      >
+                        <div className="space-y-1 font-mono tabular-nums text-xs">
+                          <div className="flex items-center gap-2 font-sans">
+                            <span className="font-semibold text-sm text-[#F5F5F7]">
+                              {s.currency}
+                            </span>
+                            <span
+                              className={`font-semibold ${
+                                s.direction === 'BUY' ? 'text-[#30D158]' : 'text-[#FF453A]'
+                              }`}
+                            >
+                              {s.direction} {s.orderType}
+                            </span>
+                            <span className="text-[#8E8E93]">· {s.date} · {s.result}</span>
+                          </div>
+                          <p className="text-[#D1D1D6]">
+                            Entry: {priv?.entry ?? '—'} · TP: {priv?.tp ?? '—'} · Extra TP:{' '}
+                            {priv?.extraTp ?? '—'} · SL: {priv?.sl ?? '—'} · Realized Pips:{' '}
+                            {s.result === 'ACTIVE' ? '0 (Active)' : s.pips}
+                          </p>
+                          {priv?.note && <p className="font-sans text-[#8E8E93]">{priv.note}</p>}
+                        </div>
 
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => handleVipDecision(req, 'APPROVED')}
-                        className="px-3.5 py-2 rounded-xl bg-[#30D158] text-[#09090B] text-xs font-semibold inline-flex items-center gap-1"
-                      >
-                        <Check className="w-3.5 h-3.5" />
-                        <span>APPROVE</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleVipDecision(req, 'REJECTED')}
-                        className="px-3.5 py-2 rounded-xl bg-[#FF453A]/20 text-[#FF453A] text-xs font-semibold"
-                      >
-                        REJECT
-                      </button>
-                    </div>
-                  </div>
-                ))}
+                        <div className="flex flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleMarkSignalOutcome(s, 'TP HIT')}
+                            className="px-2.5 py-1.5 rounded-lg bg-[#30D158]/15 text-[#30D158] text-xs font-semibold"
+                          >
+                            TP HIT
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleMarkSignalOutcome(s, 'SL HIT')}
+                            className="px-2.5 py-1.5 rounded-lg bg-[#FF453A]/15 text-[#FF453A] text-xs font-semibold"
+                          >
+                            SL HIT
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleMarkSignalOutcome(s, 'CLOSED')}
+                            className="px-2.5 py-1.5 rounded-lg bg-white/10 text-[#F5F5F7] text-xs font-semibold"
+                          >
+                            CLOSED
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingSignalId(s.id);
+                              setSigDate(s.date);
+                              setSigDirection(s.direction);
+                              setSigOrderType(s.orderType);
+                              setSigResult(s.result);
+                              setSigClosedPips(String(s.pips || 0));
+                              if (priv) {
+                                setSigEntry(String(priv.entry));
+                                setSigTp(String(priv.tp));
+                                setSigExtraTp(String(priv.extraTp));
+                                setSigSl(String(priv.sl));
+                                setSigNote(priv.note);
+                              }
+                            }}
+                            className="px-2.5 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-xs text-[#D1D1D6]"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setConfirmAction({
+                                title: 'Delete VIP Signal?',
+                                description: `Permanently delete ${s.currency} ${s.direction} signal (${s.date})?`,
+                                onConfirm: async () => {
+                                  const b = writeBatch(db);
+                                  b.delete(doc(db, 'vipSignalsPublic', s.id));
+                                  b.delete(doc(db, 'vipSignalsPrivate', s.id));
+                                  await b.commit();
+                                  showToast('ok', 'Signal deleted.');
+                                },
+                              })
+                            }
+                            className="p-1.5 rounded-lg text-[#FF453A] hover:bg-[#FF453A]/15"
+                            aria-label="Delete signal"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
               </div>
             )}
+          </div>
+        )}
+
+        {/* 3. VIP REQUESTS (Separated by Exness VIP vs Binance VIP) */}
+        {activeTab === 'vip-requests' && (
+          <div className="space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <h1 className="text-2xl font-semibold">VIP Verification Requests</h1>
+                <p className="text-xs text-[#A1A1AA]">
+                  Review and approve Exness VIP Users and Binance VIP Users separately.
+                </p>
+              </div>
+
+              <div className="inline-flex flex-wrap items-center p-1 rounded-xl bg-white/[0.05] border border-white/[0.08] gap-1">
+                {(
+                  [
+                    {
+                      id: 'EXNESS' as const,
+                      label: 'Exness VIP Requests',
+                      pending: vipRequests.filter(
+                        (r) => r.method === 'EXNESS' && r.status === 'PENDING'
+                      ).length,
+                    },
+                    {
+                      id: 'BINANCE' as const,
+                      label: 'Binance VIP Requests',
+                      pending: vipRequests.filter(
+                        (r) => r.method === 'BINANCE' && r.status === 'PENDING'
+                      ).length,
+                    },
+                    {
+                      id: 'CUSTOM' as const,
+                      label: 'Custom VIP',
+                      pending: vipRequests.filter(
+                        (r) => r.method === 'CUSTOM' && r.status === 'PENDING'
+                      ).length,
+                    },
+                    {
+                      id: 'ALL' as const,
+                      label: 'All',
+                      pending: vipRequests.filter((r) => r.status === 'PENDING').length,
+                    },
+                  ] as const
+                ).map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => setVipRequestCategoryFilter(t.id)}
+                    className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap inline-flex items-center gap-1.5 ${
+                      vipRequestCategoryFilter === t.id
+                        ? 'bg-[#D4AF37] text-[#09090B]'
+                        : 'text-[#A1A1AA] hover:text-[#F5F5F7]'
+                    }`}
+                  >
+                    <span>{t.label}</span>
+                    <span className="font-mono tabular-nums opacity-85">({t.pending})</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {(() => {
+              const filteredReqs =
+                vipRequestCategoryFilter === 'ALL'
+                  ? vipRequests
+                  : vipRequests.filter((r) => r.method === vipRequestCategoryFilter);
+
+              if (filteredReqs.length === 0) {
+                return (
+                  <div className="apple-surface rounded-2xl p-10 text-center text-sm text-[#A1A1AA]">
+                    No {vipRequestCategoryFilter === 'ALL' ? '' : vipRequestCategoryFilter + ' '}VIP
+                    requests submitted yet.
+                  </div>
+                );
+              }
+
+              return (
+                <div className="space-y-3">
+                  {filteredReqs.map((req) => (
+                    <div
+                      key={req.id}
+                      className="apple-surface rounded-2xl p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4"
+                    >
+                      <div className="space-y-1 text-xs">
+                        <p className="text-sm font-semibold text-[#F5F5F7]">
+                          {req.name} ·{' '}
+                          <span className="text-[#D4AF37]">
+                            {req.method === 'EXNESS'
+                              ? 'Exness VIP'
+                              : req.method === 'BINANCE'
+                              ? 'Binance VIP'
+                              : 'Custom VIP'}
+                          </span>{' '}
+                          ·{' '}
+                          <span
+                            className={
+                              req.status === 'APPROVED'
+                                ? 'text-[#30D158]'
+                                : req.status === 'REJECTED'
+                                ? 'text-[#FF453A]'
+                                : 'text-[#E5C76B]'
+                            }
+                          >
+                            {req.status}
+                          </span>
+                        </p>
+                        <p className="text-[#A1A1AA]">
+                          Email: {req.email} · Telegram: {req.telegram}
+                        </p>
+                        <p className="font-mono text-[#D1D1D6]">
+                          {req.method === 'EXNESS' && `Exness Account ID: ${req.exnessId}`}
+                          {req.method === 'BINANCE' && `Binance Pay TxID: ${req.transactionId}`}
+                          {req.method === 'CUSTOM' && `Details: ${req.customDetails}`}
+                          {' · '}
+                          {new Date(req.createdAtMs).toLocaleDateString()}
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleVipDecision(req, 'APPROVED')}
+                          className="px-3.5 py-2 rounded-xl bg-[#30D158] text-[#09090B] text-xs font-semibold inline-flex items-center gap-1"
+                        >
+                          <Check className="w-3.5 h-3.5" />
+                          <span>
+                            APPROVE {req.method === 'EXNESS' ? 'EXNESS VIP' : req.method === 'BINANCE' ? 'BINANCE VIP' : 'VIP'}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleVipDecision(req, 'REJECTED')}
+                          className="px-3.5 py-2 rounded-xl bg-[#FF453A]/20 text-[#FF453A] text-xs font-semibold"
+                        >
+                          REJECT
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
           </div>
         )}
 
@@ -1676,6 +2026,287 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
           </div>
         )}
 
+        {/* 4B. MARKET ANALYSIS VIDEOS (Separate Admin Section for Unlisted YouTube Videos + Likes/Dislikes) */}
+        {activeTab === 'market-analysis' && (
+          <div className="space-y-6">
+            <div>
+              <h1 className="text-2xl font-semibold">Market Analysis Videos</h1>
+              <p className="text-xs text-[#A1A1AA]">
+                Add, edit, or delete unlisted YouTube Market Analysis videos and monitor live Like &amp; Dislike counts.
+              </p>
+            </div>
+
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                try {
+                  const id = editingMaId || sanitizeId(`ma_${Date.now()}`);
+                  const resolvedThumb = clampStr(
+                    maThumb || extractYoutubeThumbnail(maUrl, ASSETS.heroTerminal),
+                    500
+                  );
+                  if (editingMaId) {
+                    await updateDoc(doc(db, 'marketAnalysisVideos', id), {
+                      title: clampStr(maTitle, 200),
+                      youtubeUrl: clampStr(maUrl, 500),
+                      thumbnail: resolvedThumb,
+                      description: clampStr(maDesc, 1000),
+                      date: clampStr(maDate || new Date().toISOString().slice(0, 10), 40),
+                      status: maStatus,
+                      updatedAt: serverTimestamp(),
+                    });
+                    showToast('ok', 'Market Analysis video updated.');
+                  } else {
+                    await setDoc(doc(db, 'marketAnalysisVideos', id), {
+                      id,
+                      title: clampStr(maTitle, 200),
+                      youtubeUrl: clampStr(maUrl, 500),
+                      thumbnail: resolvedThumb,
+                      description: clampStr(maDesc, 1000),
+                      date: clampStr(maDate || new Date().toISOString().slice(0, 10), 40),
+                      status: maStatus,
+                      createdAt: serverTimestamp(),
+                      updatedAt: serverTimestamp(),
+                    });
+                    showToast('ok', 'Market Analysis video published.');
+                  }
+                  setEditingMaId(null);
+                  setMaTitle('');
+                  setMaUrl('');
+                  setMaThumb('');
+                  setMaDate(new Date().toISOString().slice(0, 10));
+                  setMaStatus('ACTIVE');
+                  setMaDesc('');
+                } catch (err) {
+                  handleFirestoreError(err, OperationType.WRITE, 'marketAnalysisVideos');
+                }
+              }}
+              className="apple-surface rounded-2xl p-6 space-y-4"
+            >
+              <div className="flex items-center justify-between">
+                <h2 className="text-sm font-semibold text-[#F5F5F7]">
+                  {editingMaId
+                    ? 'Edit Market Analysis Video'
+                    : 'Publish New Market Analysis Video (Unlisted YouTube Supported)'}
+                </h2>
+                {editingMaId && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingMaId(null);
+                      setMaTitle('');
+                      setMaUrl('');
+                      setMaThumb('');
+                      setMaDate(new Date().toISOString().slice(0, 10));
+                      setMaStatus('ACTIVE');
+                      setMaDesc('');
+                    }}
+                    className="text-xs text-[#A1A1AA] hover:text-[#F5F5F7]"
+                  >
+                    Cancel Edit
+                  </button>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs text-[#A1A1AA] mb-1">Analysis Title</label>
+                  <input
+                    type="text"
+                    required
+                    maxLength={200}
+                    placeholder="e.g. XAUUSD Weekly Storyline & London Roadblocks"
+                    value={maTitle}
+                    onChange={(e) => setMaTitle(e.target.value)}
+                    className="w-full px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-[#A1A1AA] mb-1">
+                    Unlisted YouTube URL (youtu.be/... or youtube.com/watch?v=...)
+                  </label>
+                  <input
+                    type="url"
+                    required
+                    maxLength={500}
+                    placeholder="https://youtu.be/..."
+                    value={maUrl}
+                    onChange={(e) => setMaUrl(e.target.value)}
+                    className="w-full px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-[#A1A1AA] mb-1">Date</label>
+                  <input
+                    type="date"
+                    value={maDate}
+                    onChange={(e) => setMaDate(e.target.value)}
+                    className="w-full px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-[#A1A1AA] mb-1">Visibility</label>
+                  <select
+                    value={maStatus}
+                    onChange={(e) => setMaStatus(e.target.value as 'ACTIVE' | 'INACTIVE')}
+                    className="w-full px-3.5 py-2 rounded-xl bg-[#14151B] border border-white/10 text-sm"
+                  >
+                    <option value="ACTIVE">ACTIVE (Visible on Website)</option>
+                    <option value="INACTIVE">INACTIVE (Hidden)</option>
+                  </select>
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="block text-xs text-[#A1A1AA] mb-1">
+                    Optional Custom Thumbnail URL (Leave blank to auto-use YouTube thumbnail)
+                  </label>
+                  <input
+                    type="text"
+                    maxLength={500}
+                    placeholder="Auto-detected from YouTube link when left empty"
+                    value={maThumb}
+                    onChange={(e) => setMaThumb(e.target.value)}
+                    className="w-full px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm"
+                  />
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="block text-xs text-[#A1A1AA] mb-1">Analysis Notes / Description</label>
+                  <textarea
+                    rows={2}
+                    required
+                    maxLength={1000}
+                    placeholder="Key H4 & Daily XAUUSD MSNR levels covered in this session..."
+                    value={maDesc}
+                    onChange={(e) => setMaDesc(e.target.value)}
+                    className="w-full px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm"
+                  />
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                className="px-5 py-2.5 rounded-xl bg-[#D4AF37] text-[#09090B] text-xs font-semibold hover:bg-[#E5C76B] inline-flex items-center gap-2"
+              >
+                <Plus className="w-4 h-4" />
+                <span>
+                  {editingMaId ? 'Save Market Analysis Changes' : 'Publish Market Analysis Video'}
+                </span>
+              </button>
+            </form>
+
+            {allMarketVideos.length === 0 ? (
+              <div className="apple-surface rounded-2xl p-10 text-center text-sm text-[#A1A1AA]">
+                No Market Analysis videos added yet. Paste an unlisted YouTube link above to publish.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {allMarketVideos.map((v) => {
+                  const likes = allMarketReactions.filter(
+                    (r) => r.videoId === v.id && r.reaction === 'LIKE'
+                  ).length;
+                  const dislikes = allMarketReactions.filter(
+                    (r) => r.videoId === v.id && r.reaction === 'DISLIKE'
+                  ).length;
+                  const previewThumb =
+                    v.thumbnail || extractYoutubeThumbnail(v.youtubeUrl, ASSETS.heroTerminal);
+
+                  return (
+                    <div
+                      key={v.id}
+                      className="apple-surface rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                    >
+                      <div className="flex items-start sm:items-center gap-3.5 min-w-0">
+                        <div className="w-24 aspect-video rounded-lg overflow-hidden bg-black/50 border border-white/10 shrink-0">
+                          <ResilientImage
+                            src={previewThumb}
+                            alt={v.title}
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                        <div className="min-w-0 space-y-1">
+                          <p className="text-sm font-semibold text-[#F5F5F7] truncate">{v.title}</p>
+                          <p className="text-xs text-[#A1A1AA] truncate">
+                            {v.date} ·{' '}
+                            <span
+                              className={
+                                v.status === 'ACTIVE' ? 'text-[#30D158]' : 'text-[#8E8E93]'
+                              }
+                            >
+                              {v.status}
+                            </span>{' '}
+                            · {v.youtubeUrl}
+                          </p>
+                          <div className="flex items-center gap-3 text-xs font-mono tabular-nums text-[#D1D1D6]">
+                            <span className="inline-flex items-center gap-1 text-[#E5C76B]">
+                              <ThumbsUp className="w-3.5 h-3.5" />
+                              {likes}
+                            </span>
+                            <span className="inline-flex items-center gap-1 text-[#A1A1AA]">
+                              <ThumbsDown className="w-3.5 h-3.5" />
+                              {dislikes}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            await updateDoc(doc(db, 'marketAnalysisVideos', v.id), {
+                              status: v.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE',
+                              updatedAt: serverTimestamp(),
+                            });
+                            showToast(
+                              'ok',
+                              `Video marked ${v.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE'}.`
+                            );
+                          }}
+                          className="px-2.5 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-xs text-[#D1D1D6]"
+                        >
+                          {v.status === 'ACTIVE' ? 'Hide' : 'Activate'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingMaId(v.id);
+                            setMaTitle(v.title);
+                            setMaUrl(v.youtubeUrl);
+                            setMaThumb(v.thumbnail);
+                            setMaDate(v.date);
+                            setMaStatus(v.status);
+                            setMaDesc(v.description);
+                          }}
+                          className="px-2.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-xs font-semibold text-[#F5F5F7] inline-flex items-center gap-1"
+                        >
+                          <Edit3 className="w-3.5 h-3.5" />
+                          <span>Edit</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setConfirmAction({
+                              title: 'Delete Market Analysis Video?',
+                              description: `Permanently delete "${v.title}" from Market Analysis?`,
+                              onConfirm: async () => {
+                                await deleteDoc(doc(db, 'marketAnalysisVideos', v.id));
+                                showToast('ok', 'Market Analysis video deleted.');
+                              },
+                            })
+                          }
+                          className="p-2 rounded-lg text-[#FF453A] hover:bg-[#FF453A]/15"
+                          aria-label="Delete Market Analysis video"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* 5. VIDEOS */}
         {activeTab === 'videos' && (
           <div className="space-y-6">
@@ -1700,29 +2331,66 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
             <form
               onSubmit={async (e) => {
                 e.preventDefault();
-                const id = sanitizeId(`vid_${Date.now()}`);
-                await setDoc(doc(db, 'videos', id), {
-                  id,
-                  title: clampStr(vidTitle, 200),
-                  youtubeUrl: clampStr(vidUrl, 500),
-                  thumbnail: clampStr(
-                    vidThumb || extractYoutubeThumbnail(vidUrl, ASSETS.videoThumb),
-                    500
-                  ),
-                  description: clampStr(vidDesc, 1000),
-                  date: new Date().toISOString().slice(0, 10),
-                  status: 'ACTIVE',
-                  createdAt: serverTimestamp(),
-                  updatedAt: serverTimestamp(),
-                });
+                const id = editingVidId || sanitizeId(`vid_${Date.now()}`);
+                const resolvedThumb = clampStr(
+                  vidThumb || extractYoutubeThumbnail(vidUrl, ASSETS.videoThumb),
+                  500
+                );
+                if (editingVidId) {
+                  await updateDoc(doc(db, 'videos', id), {
+                    title: clampStr(vidTitle, 200),
+                    youtubeUrl: clampStr(vidUrl, 500),
+                    thumbnail: resolvedThumb,
+                    description: clampStr(vidDesc, 1000),
+                    date: clampStr(vidDate || new Date().toISOString().slice(0, 10), 40),
+                    status: vidStatus,
+                    updatedAt: serverTimestamp(),
+                  });
+                  showToast('ok', 'Video updated.');
+                } else {
+                  await setDoc(doc(db, 'videos', id), {
+                    id,
+                    title: clampStr(vidTitle, 200),
+                    youtubeUrl: clampStr(vidUrl, 500),
+                    thumbnail: resolvedThumb,
+                    description: clampStr(vidDesc, 1000),
+                    date: clampStr(vidDate || new Date().toISOString().slice(0, 10), 40),
+                    status: vidStatus,
+                    createdAt: serverTimestamp(),
+                    updatedAt: serverTimestamp(),
+                  });
+                  showToast('ok', 'Video added to library.');
+                }
+                setEditingVidId(null);
                 setVidTitle('');
                 setVidUrl('');
                 setVidThumb('');
+                setVidDate(new Date().toISOString().slice(0, 10));
+                setVidStatus('ACTIVE');
                 setVidDesc('');
-                showToast('ok', 'Video added to library.');
               }}
               className="apple-surface rounded-2xl p-5 grid grid-cols-1 sm:grid-cols-2 gap-4"
             >
+              <div className="sm:col-span-2 flex items-center justify-between">
+                <h2 className="text-sm font-semibold text-[#F5F5F7]">
+                  {editingVidId ? 'Edit Video Lesson' : 'Add Video Lesson'}
+                </h2>
+                {editingVidId && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingVidId(null);
+                      setVidTitle('');
+                      setVidUrl('');
+                      setVidThumb('');
+                      setVidDesc('');
+                    }}
+                    className="text-xs text-[#A1A1AA] hover:text-[#F5F5F7]"
+                  >
+                    Cancel Edit
+                  </button>
+                )}
+              </div>
               <input
                 type="text"
                 required
@@ -1734,7 +2402,7 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
               <input
                 type="url"
                 required
-                placeholder="YouTube URL (https://www.youtube.com/watch?v=...)"
+                placeholder="YouTube URL (https://www.youtube.com/watch?v=... or youtu.be/...)"
                 value={vidUrl}
                 onChange={(e) => setVidUrl(e.target.value)}
                 className="px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm"
@@ -1757,9 +2425,9 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
               <div className="sm:col-span-2">
                 <button
                   type="submit"
-                  className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-xs font-semibold"
+                  className="px-4 py-2 rounded-xl bg-[#D4AF37] text-[#09090B] hover:bg-[#E5C76B] text-xs font-semibold"
                 >
-                  Add Video Manually
+                  {editingVidId ? 'Save Video Changes' : 'Add Video Lesson'}
                 </button>
               </div>
             </form>
@@ -1770,40 +2438,57 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
                   key={v.id}
                   className="apple-surface rounded-xl p-4 flex items-center justify-between gap-4"
                 >
-                  <div>
-                    <p className="text-sm font-semibold text-[#F5F5F7]">{v.title}</p>
-                    <p className="text-xs text-[#A1A1AA]">{v.youtubeUrl} · {v.status}</p>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-[#F5F5F7] truncate">{v.title}</p>
+                    <p className="text-xs text-[#A1A1AA] truncate">{v.youtubeUrl} · {v.status}</p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setConfirmAction({
-                        title: 'Delete Video?',
-                        description: `Remove "${v.title}" from the Videos library?`,
-                        onConfirm: async () => {
-                          await deleteDoc(doc(db, 'videos', v.id));
-                          showToast('ok', 'Video removed.');
-                        },
-                      })
-                    }
-                    className="p-2 rounded-lg text-[#FF453A] hover:bg-[#FF453A]/15"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingVidId(v.id);
+                        setVidTitle(v.title);
+                        setVidUrl(v.youtubeUrl);
+                        setVidThumb(v.thumbnail);
+                        setVidDate(v.date);
+                        setVidStatus(v.status);
+                        setVidDesc(v.description);
+                      }}
+                      className="px-2.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-xs font-semibold"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setConfirmAction({
+                          title: 'Delete Video?',
+                          description: `Remove "${v.title}" from the Videos library?`,
+                          onConfirm: async () => {
+                            await deleteDoc(doc(db, 'videos', v.id));
+                            showToast('ok', 'Video removed.');
+                          },
+                        })
+                      }
+                      className="p-2 rounded-lg text-[#FF453A] hover:bg-[#FF453A]/15"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
           </div>
         )}
 
-        {/* 6. FREE PDFS */}
+        {/* 6. FREE PDFS (Automatic Cover Extraction From PDF Link / File) */}
         {activeTab === 'free-pdfs' && (
           <div className="space-y-6">
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div>
                 <h1 className="text-2xl font-semibold">Free PDF Library</h1>
-                <p className="text-xs text-[#A1A1AA] font-mono">
-                  Google Sheet Columns: id, name, description, cover_url, pdf_url, status
+                <p className="text-xs text-[#A1A1AA]">
+                  Provide a PDF link or upload a PDF — the cover page thumbnail is extracted automatically.
                 </p>
               </div>
               <button
@@ -1820,27 +2505,69 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
             <form
               onSubmit={async (e) => {
                 e.preventDefault();
-                const id = sanitizeId(`free_${Date.now()}`);
-                await setDoc(doc(db, 'freeBooks', id), {
-                  id,
-                  name: clampStr(fbName, 200),
-                  description: clampStr(fbDesc, 1000),
-                  coverUrl: clampStr(fbCover || ASSETS.bookMsnr, 500),
-                  pdfUrl: clampStr(fbPdf, 500),
-                  views: 0,
-                  downloads: 0,
-                  status: 'ACTIVE',
-                  createdAt: serverTimestamp(),
-                  updatedAt: serverTimestamp(),
-                });
-                setFbName('');
-                setFbDesc('');
-                setFbCover('');
-                setFbPdf('');
-                showToast('ok', 'Free PDF published.');
+                setFbExtractingCover(true);
+                try {
+                  let resolvedCover = fbCover;
+                  if (!resolvedCover && fbPdf.trim()) {
+                    resolvedCover = (await extractPdfCoverFromUrl(fbPdf.trim())) || '';
+                  }
+                  const id = editingFbId || sanitizeId(`free_${Date.now()}`);
+                  if (editingFbId) {
+                    await updateDoc(doc(db, 'freeBooks', id), {
+                      name: clampStr(fbName, 200),
+                      description: clampStr(fbDesc, 1000),
+                      coverUrl: clampStr(resolvedCover, 175000),
+                      pdfUrl: clampStr(fbPdf, 500),
+                      updatedAt: serverTimestamp(),
+                    });
+                    showToast('ok', 'Free PDF updated.');
+                  } else {
+                    await setDoc(doc(db, 'freeBooks', id), {
+                      id,
+                      name: clampStr(fbName, 200),
+                      description: clampStr(fbDesc, 1000),
+                      coverUrl: clampStr(resolvedCover, 175000),
+                      pdfUrl: clampStr(fbPdf, 500),
+                      views: 0,
+                      downloads: 0,
+                      status: 'ACTIVE',
+                      createdAt: serverTimestamp(),
+                      updatedAt: serverTimestamp(),
+                    });
+                    showToast('ok', 'Free PDF published with automatic cover thumbnail.');
+                  }
+                  setEditingFbId(null);
+                  setFbName('');
+                  setFbDesc('');
+                  setFbCover('');
+                  setFbPdf('');
+                } finally {
+                  setFbExtractingCover(false);
+                }
               }}
               className="apple-surface rounded-2xl p-5 grid grid-cols-1 sm:grid-cols-2 gap-4"
             >
+              <div className="sm:col-span-2 flex items-center justify-between">
+                <h2 className="text-sm font-semibold text-[#F5F5F7]">
+                  {editingFbId ? 'Edit Free PDF' : 'Publish Free PDF (Auto-Cover Enabled)'}
+                </h2>
+                {editingFbId && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingFbId(null);
+                      setFbName('');
+                      setFbDesc('');
+                      setFbCover('');
+                      setFbPdf('');
+                    }}
+                    className="text-xs text-[#A1A1AA] hover:text-[#F5F5F7]"
+                  >
+                    Cancel Edit
+                  </button>
+                )}
+              </div>
+
               <input
                 type="text"
                 required
@@ -1857,57 +2584,68 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
                 onChange={(e) => setFbDesc(e.target.value)}
                 className="px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm"
               />
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  placeholder="Cover Image URL"
-                  value={fbCover}
-                  onChange={(e) => setFbCover(e.target.value)}
-                  className="flex-1 px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm"
-                />
-                <label className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-xs font-semibold cursor-pointer inline-flex items-center gap-1.5 shrink-0">
-                  <Upload className="w-3.5 h-3.5" />
-                  <span>{uploadingField === 'covers' ? '...' : 'Cover'}</span>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={(e) => {
-                      const f = e.target.files?.[0];
-                      if (f) handleStorageUpload(f, 'covers', setFbCover);
-                    }}
-                  />
-                </label>
-              </div>
-              <div className="flex gap-2">
+
+              <div className="sm:col-span-2 flex flex-col sm:flex-row gap-3">
                 <input
                   type="text"
                   required
-                  placeholder="PDF Storage URL"
+                  placeholder="Paste PDF Link (Google Drive, Dropbox, Direct PDF URL, or Upload PDF)"
                   value={fbPdf}
-                  onChange={(e) => setFbPdf(e.target.value)}
+                  onChange={(e) => {
+                    setFbCover('');
+                    setFbPdf(e.target.value);
+                  }}
                   className="flex-1 px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm"
                 />
-                <label className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-xs font-semibold cursor-pointer inline-flex items-center gap-1.5 shrink-0">
+                <label className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-xs font-semibold cursor-pointer inline-flex items-center justify-center gap-1.5 shrink-0">
                   <Upload className="w-3.5 h-3.5" />
-                  <span>{uploadingField === 'free-pdfs' ? '...' : 'PDF'}</span>
+                  <span>{uploadingField === 'free-pdfs' ? 'Uploading...' : 'Upload PDF File'}</span>
                   <input
                     type="file"
                     accept="application/pdf"
                     className="hidden"
                     onChange={(e) => {
                       const f = e.target.files?.[0];
-                      if (f) handleStorageUpload(f, 'free-pdfs', setFbPdf);
+                      if (f) {
+                        handleStorageUpload(f, 'free-pdfs', setFbPdf, setFbCover);
+                      }
                     }}
                   />
                 </label>
               </div>
+
+              {(fbExtractingCover || fbCover) && (
+                <div className="sm:col-span-2 flex items-center gap-3 p-3 rounded-xl bg-white/[0.03] border border-white/10">
+                  {fbCover ? (
+                    <img
+                      src={fbCover}
+                      alt="Extracted PDF cover preview"
+                      referrerPolicy="no-referrer"
+                      className="w-12 h-16 object-cover rounded-lg border border-white/15 shrink-0"
+                    />
+                  ) : (
+                    <div className="w-12 h-16 rounded-lg bg-white/5 flex items-center justify-center shrink-0">
+                      <Loader2 className="w-4 h-4 text-[#D4AF37] animate-spin" />
+                    </div>
+                  )}
+                  <div className="text-xs text-[#A1A1AA]">
+                    <p className="font-semibold text-[#F5F5F7]">
+                      {fbExtractingCover
+                        ? 'Extracting Page 1 cover from PDF...'
+                        : 'PDF Page 1 Cover Extracted Automatically'}
+                    </p>
+                    <p>No manual cover image upload needed.</p>
+                  </div>
+                </div>
+              )}
+
               <div className="sm:col-span-2">
                 <button
                   type="submit"
-                  className="px-4 py-2 rounded-xl bg-[#D4AF37] text-[#09090B] text-xs font-semibold"
+                  disabled={fbExtractingCover}
+                  className="px-4 py-2 rounded-xl bg-[#D4AF37] text-[#09090B] text-xs font-semibold disabled:opacity-60"
                 >
-                  Publish Free PDF
+                  {editingFbId ? 'Save Free PDF Changes' : 'Publish Free PDF'}
                 </button>
               </div>
             </form>
@@ -1918,42 +2656,57 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
                   key={b.id}
                   className="apple-surface rounded-xl p-4 flex items-center justify-between gap-4"
                 >
-                  <div>
-                    <p className="text-sm font-semibold">{b.name}</p>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold truncate">{b.name}</p>
                     <p className="text-xs font-mono text-[#A1A1AA]">
                       {b.views} views · {b.downloads} downloads · {b.status}
                     </p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setConfirmAction({
-                        title: 'Delete Free PDF?',
-                        description: `Remove "${b.name}" from Free PDFs?`,
-                        onConfirm: async () => {
-                          await deleteDoc(doc(db, 'freeBooks', b.id));
-                          showToast('ok', 'Free PDF deleted.');
-                        },
-                      })
-                    }
-                    className="p-2 rounded-lg text-[#FF453A] hover:bg-[#FF453A]/15"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingFbId(b.id);
+                        setFbName(b.name);
+                        setFbDesc(b.description);
+                        setFbCover(b.coverUrl);
+                        setFbPdf(b.pdfUrl);
+                      }}
+                      className="px-2.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-xs font-semibold"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setConfirmAction({
+                          title: 'Delete Free PDF?',
+                          description: `Remove "${b.name}" from Free PDFs?`,
+                          onConfirm: async () => {
+                            await deleteDoc(doc(db, 'freeBooks', b.id));
+                            showToast('ok', 'Free PDF deleted.');
+                          },
+                        })
+                      }
+                      className="p-2 rounded-lg text-[#FF453A] hover:bg-[#FF453A]/15"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
           </div>
         )}
 
-        {/* 7. PAID PDFS */}
+        {/* 7. PAID PDFS (Automatic Cover Extraction From Protected PDF Link / File) */}
         {activeTab === 'paid-pdfs' && (
           <div className="space-y-6">
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div>
                 <h1 className="text-2xl font-semibold">Paid PDF Bookstore</h1>
-                <p className="text-xs text-[#A1A1AA] font-mono">
-                  Google Sheet Columns: id, name, description, cover_url, price, pdf_url, status
+                <p className="text-xs text-[#A1A1AA]">
+                  Provide the protected PDF link or upload a PDF — Page 1 is extracted automatically as the public bookstore cover.
                 </p>
               </div>
               <button
@@ -1970,32 +2723,82 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
             <form
               onSubmit={async (e) => {
                 e.preventDefault();
-                const id = sanitizeId(`paid_${Date.now()}`);
-                const batch = writeBatch(db);
-                batch.set(doc(db, 'paidBooksPublic', id), {
-                  id,
-                  name: clampStr(pbName, 200),
-                  description: clampStr(pbDesc, 1000),
-                  coverUrl: clampStr(pbCover || ASSETS.bookXauusd, 500),
-                  price: Math.max(0, Number(pbPrice) || 29),
-                  status: 'ACTIVE',
-                  createdAt: serverTimestamp(),
-                  updatedAt: serverTimestamp(),
-                });
-                batch.set(doc(db, 'paidBooksProtected', id), {
-                  id,
-                  pdfUrl: clampStr(pbPdf, 500),
-                  updatedAt: serverTimestamp(),
-                });
-                await batch.commit();
-                setPbName('');
-                setPbDesc('');
-                setPbCover('');
-                setPbPdf('');
-                showToast('ok', 'Paid book published with protected download vault.');
+                setPbExtractingCover(true);
+                try {
+                  let resolvedCover = pbCover;
+                  if (!resolvedCover && pbPdf.trim()) {
+                    resolvedCover = (await extractPdfCoverFromUrl(pbPdf.trim())) || '';
+                  }
+                  const id = editingPbId || sanitizeId(`paid_${Date.now()}`);
+                  const batch = writeBatch(db);
+                  if (editingPbId) {
+                    batch.update(doc(db, 'paidBooksPublic', id), {
+                      name: clampStr(pbName, 200),
+                      description: clampStr(pbDesc, 1000),
+                      coverUrl: clampStr(resolvedCover || ASSETS.bookXauusd, 175000),
+                      price: Math.max(0, Number(pbPrice) || 29),
+                      updatedAt: serverTimestamp(),
+                    });
+                    if (pbPdf.trim()) {
+                      batch.set(doc(db, 'paidBooksProtected', id), {
+                        id,
+                        pdfUrl: clampStr(pbPdf, 500),
+                        updatedAt: serverTimestamp(),
+                      });
+                    }
+                    await batch.commit();
+                    showToast('ok', 'Paid PDF updated.');
+                  } else {
+                    batch.set(doc(db, 'paidBooksPublic', id), {
+                      id,
+                      name: clampStr(pbName, 200),
+                      description: clampStr(pbDesc, 1000),
+                      coverUrl: clampStr(resolvedCover || ASSETS.bookXauusd, 175000),
+                      price: Math.max(0, Number(pbPrice) || 29),
+                      status: 'ACTIVE',
+                      createdAt: serverTimestamp(),
+                      updatedAt: serverTimestamp(),
+                    });
+                    batch.set(doc(db, 'paidBooksProtected', id), {
+                      id,
+                      pdfUrl: clampStr(pbPdf, 500),
+                      updatedAt: serverTimestamp(),
+                    });
+                    await batch.commit();
+                    showToast('ok', 'Paid book published with automatic cover & protected vault.');
+                  }
+                  setEditingPbId(null);
+                  setPbName('');
+                  setPbDesc('');
+                  setPbCover('');
+                  setPbPdf('');
+                } finally {
+                  setPbExtractingCover(false);
+                }
               }}
               className="apple-surface rounded-2xl p-5 grid grid-cols-1 sm:grid-cols-2 gap-4"
             >
+              <div className="sm:col-span-2 flex items-center justify-between">
+                <h2 className="text-sm font-semibold text-[#F5F5F7]">
+                  {editingPbId ? 'Edit Paid PDF Book' : 'Publish Paid PDF Book (Auto-Cover Enabled)'}
+                </h2>
+                {editingPbId && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingPbId(null);
+                      setPbName('');
+                      setPbDesc('');
+                      setPbCover('');
+                      setPbPdf('');
+                    }}
+                    className="text-xs text-[#A1A1AA] hover:text-[#F5F5F7]"
+                  >
+                    Cancel Edit
+                  </button>
+                )}
+              </div>
+
               <input
                 type="text"
                 required
@@ -2022,57 +2825,70 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
                 onChange={(e) => setPbDesc(e.target.value)}
                 className="sm:col-span-2 px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm"
               />
-              <div className="flex gap-2">
+
+              <div className="sm:col-span-2 flex flex-col sm:flex-row gap-3">
                 <input
                   type="text"
-                  placeholder="Cover URL"
-                  value={pbCover}
-                  onChange={(e) => setPbCover(e.target.value)}
-                  className="flex-1 px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm"
-                />
-                <label className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-xs font-semibold cursor-pointer inline-flex items-center gap-1.5 shrink-0">
-                  <Upload className="w-3.5 h-3.5" />
-                  <span>Cover</span>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={(e) => {
-                      const f = e.target.files?.[0];
-                      if (f) handleStorageUpload(f, 'paid-covers', setPbCover);
-                    }}
-                  />
-                </label>
-              </div>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  required
-                  placeholder="Protected PDF URL"
+                  required={!editingPbId}
+                  placeholder="Protected PDF Link (Google Drive, Dropbox, Direct PDF URL, or Upload PDF)"
                   value={pbPdf}
-                  onChange={(e) => setPbPdf(e.target.value)}
+                  onChange={(e) => {
+                    setPbCover('');
+                    setPbPdf(e.target.value);
+                  }}
                   className="flex-1 px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm"
                 />
-                <label className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-xs font-semibold cursor-pointer inline-flex items-center gap-1.5 shrink-0">
+                <label className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-xs font-semibold cursor-pointer inline-flex items-center justify-center gap-1.5 shrink-0">
                   <Upload className="w-3.5 h-3.5" />
-                  <span>PDF</span>
+                  <span>
+                    {uploadingField === 'protected-pdfs' ? 'Uploading...' : 'Upload PDF File'}
+                  </span>
                   <input
                     type="file"
                     accept="application/pdf"
                     className="hidden"
                     onChange={(e) => {
                       const f = e.target.files?.[0];
-                      if (f) handleStorageUpload(f, 'protected-pdfs', setPbPdf);
+                      if (f) {
+                        handleStorageUpload(f, 'protected-pdfs', setPbPdf, setPbCover);
+                      }
                     }}
                   />
                 </label>
               </div>
+
+              {(pbExtractingCover || pbCover) && (
+                <div className="sm:col-span-2 flex items-center gap-3 p-3 rounded-xl bg-white/[0.03] border border-white/10">
+                  {pbCover ? (
+                    <img
+                      src={pbCover}
+                      alt="Extracted paid PDF cover preview"
+                      referrerPolicy="no-referrer"
+                      className="w-12 h-16 object-cover rounded-lg border border-white/15 shrink-0"
+                    />
+                  ) : (
+                    <div className="w-12 h-16 rounded-lg bg-white/5 flex items-center justify-center shrink-0">
+                      <Loader2 className="w-4 h-4 text-[#D4AF37] animate-spin" />
+                    </div>
+                  )}
+                  <div className="text-xs text-[#A1A1AA]">
+                    <p className="font-semibold text-[#F5F5F7]">
+                      {pbExtractingCover
+                        ? 'Extracting Page 1 cover from PDF...'
+                        : 'Book Cover Automatically Extracted From PDF Page 1'}
+                    </p>
+                    <p>Cover is saved publicly while the PDF link stays locked inside the protected vault.</p>
+                  </div>
+                </div>
+              )}
+
               <div className="sm:col-span-2">
                 <button
                   type="submit"
-                  className="px-4 py-2 rounded-xl bg-[#D4AF37] text-[#09090B] text-xs font-semibold"
+                  disabled={pbExtractingCover}
+                  className="px-4 py-2 rounded-xl bg-[#D4AF37] text-[#09090B] text-xs font-semibold disabled:opacity-60"
                 >
-                  Publish Paid PDF
+                  {editingPbId ? 'Save Paid PDF Changes' : 'Publish Paid PDF'}
                 </button>
               </div>
             </form>
@@ -2083,87 +2899,440 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
                   key={b.id}
                   className="apple-surface rounded-xl p-4 flex items-center justify-between gap-4"
                 >
-                  <div>
-                    <p className="text-sm font-semibold">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold truncate">
                       {b.name} · <span className="font-mono text-[#E5C76B]">${b.price}</span>
                     </p>
-                    <p className="text-xs text-[#A1A1AA]">{b.description}</p>
+                    <p className="text-xs text-[#A1A1AA] truncate">{b.description}</p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setConfirmAction({
-                        title: 'Delete Paid Book?',
-                        description: `Remove "${b.name}" from Paid PDFs?`,
-                        onConfirm: async () => {
-                          const batch = writeBatch(db);
-                          batch.delete(doc(db, 'paidBooksPublic', b.id));
-                          batch.delete(doc(db, 'paidBooksProtected', b.id));
-                          await batch.commit();
-                          showToast('ok', 'Paid book removed.');
-                        },
-                      })
-                    }
-                    className="p-2 rounded-lg text-[#FF453A] hover:bg-[#FF453A]/15"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        setEditingPbId(b.id);
+                        setPbName(b.name);
+                        setPbDesc(b.description);
+                        setPbPrice(String(b.price));
+                        setPbCover(b.coverUrl);
+                        try {
+                          const protSnap = await getDoc(doc(db, 'paidBooksProtected', b.id));
+                          setPbPdf(
+                            protSnap.exists()
+                              ? (protSnap.data() as { pdfUrl?: string }).pdfUrl || ''
+                              : ''
+                          );
+                        } catch {
+                          setPbPdf('');
+                        }
+                      }}
+                      className="px-2.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-xs font-semibold"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setConfirmAction({
+                          title: 'Delete Paid Book?',
+                          description: `Remove "${b.name}" from Paid PDFs?`,
+                          onConfirm: async () => {
+                            const batch = writeBatch(db);
+                            batch.delete(doc(db, 'paidBooksPublic', b.id));
+                            batch.delete(doc(db, 'paidBooksProtected', b.id));
+                            await batch.commit();
+                            showToast('ok', 'Paid book removed.');
+                          },
+                        })
+                      }
+                      className="p-2 rounded-lg text-[#FF453A] hover:bg-[#FF453A]/15"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
           </div>
         )}
 
-        {/* 8. USERS */}
+        {/* 8. VIP USERS (Organized Into Separate Exness VIP Users & Binance VIP Users Categories) */}
         {activeTab === 'users' && (
           <div className="space-y-6">
-            <h1 className="text-2xl font-semibold">Registered Members &amp; VIP Control</h1>
-            <div className="space-y-3">
-              {allUsers.map((u) => {
-                const g = allGrants[u.uid];
-                return (
-                  <div
-                    key={u.uid}
-                    className="apple-surface rounded-2xl p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4"
-                  >
-                    <div className="space-y-1 text-xs">
-                      <p className="text-sm font-semibold text-[#F5F5F7]">
-                        {u.name} · <span className="text-[#A1A1AA]">{u.email}</span>
-                      </p>
-                      <p className="text-[#A1A1AA] font-mono">
-                        Telegram: {u.telegram || '—'} · VIP: {g?.vipType || 'NONE'} (
-                        {g?.vipStatus || 'NONE'})
-                        {g?.vipType === 'MONTHLY' &&
-                          ` · Expires ${new Date(g.vipExpiryMs).toLocaleDateString()}`}
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => handleManualUserVip(u.uid, 'LIFETIME')}
-                        className="px-3 py-1.5 rounded-lg bg-[#D4AF37] text-[#09090B] text-xs font-semibold"
-                      >
-                        Grant Lifetime
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleManualUserVip(u.uid, 'EXTEND_30D')}
-                        className="px-3 py-1.5 rounded-lg bg-white/10 text-xs font-semibold"
-                      >
-                        +30 Days Monthly
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleManualUserVip(u.uid, 'REVOKE')}
-                        className="px-3 py-1.5 rounded-lg bg-[#FF453A]/20 text-[#FF453A] text-xs font-semibold"
-                      >
-                        Revoke VIP
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
+            <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+              <div className="space-y-1">
+                <h1 className="text-2xl font-semibold">VIP Users &amp; Category Management</h1>
+                <p className="text-xs text-[#A1A1AA]">
+                  Manage and approve <strong className="text-[#F5F5F7]">Exness VIP Users</strong> and{' '}
+                  <strong className="text-[#F5F5F7]">Binance VIP Users</strong> in dedicated categories.
+                </p>
+              </div>
+
+              <input
+                type="search"
+                value={memberSearch}
+                onChange={(e) => setMemberSearch(e.target.value)}
+                placeholder="Search name, email, ID..."
+                className="w-full sm:w-64 px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm"
+              />
             </div>
+
+            {(() => {
+              const q = memberSearch.trim().toLowerCase();
+              const matchesSearch = (text: string) => !q || text.toLowerCase().includes(q);
+
+              const exnessUsers = allUsers.filter(
+                (u) =>
+                  resolveUserVipCategory(u.uid) === 'EXNESS' &&
+                  matchesSearch(`${u.name} ${u.email} ${u.telegram}`)
+              );
+              const binanceUsers = allUsers.filter(
+                (u) =>
+                  resolveUserVipCategory(u.uid) === 'BINANCE' &&
+                  matchesSearch(`${u.name} ${u.email} ${u.telegram}`)
+              );
+              const pendingExnessReqs = vipRequests.filter(
+                (r) =>
+                  r.method === 'EXNESS' &&
+                  r.status === 'PENDING' &&
+                  matchesSearch(`${r.name} ${r.email} ${r.exnessId} ${r.telegram}`)
+              );
+              const pendingBinanceReqs = vipRequests.filter(
+                (r) =>
+                  r.method === 'BINANCE' &&
+                  r.status === 'PENDING' &&
+                  matchesSearch(`${r.name} ${r.email} ${r.transactionId} ${r.telegram}`)
+              );
+              const filteredAllUsers = allUsers.filter((u) =>
+                matchesSearch(`${u.name} ${u.email} ${u.telegram}`)
+              );
+
+              return (
+                <>
+                  {/* Category Switcher: Exness VIP Users vs Binance VIP Users vs All Members */}
+                  <div className="inline-flex flex-wrap items-center p-1 rounded-xl bg-white/[0.05] border border-white/[0.08] gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setVipUsersCategoryTab('EXNESS')}
+                      className={`px-4 py-2 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap inline-flex items-center gap-2 ${
+                        vipUsersCategoryTab === 'EXNESS'
+                          ? 'bg-[#D4AF37] text-[#09090B]'
+                          : 'text-[#A1A1AA] hover:text-[#F5F5F7]'
+                      }`}
+                    >
+                      <span>Exness VIP Users</span>
+                      <span className="font-mono tabular-nums">
+                        ({exnessUsers.length}
+                        {pendingExnessReqs.length > 0 ? ` · ${pendingExnessReqs.length} Pending` : ''})
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setVipUsersCategoryTab('BINANCE')}
+                      className={`px-4 py-2 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap inline-flex items-center gap-2 ${
+                        vipUsersCategoryTab === 'BINANCE'
+                          ? 'bg-[#D4AF37] text-[#09090B]'
+                          : 'text-[#A1A1AA] hover:text-[#F5F5F7]'
+                      }`}
+                    >
+                      <span>Binance VIP Users</span>
+                      <span className="font-mono tabular-nums">
+                        ({binanceUsers.length}
+                        {pendingBinanceReqs.length > 0 ? ` · ${pendingBinanceReqs.length} Pending` : ''})
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setVipUsersCategoryTab('ALL')}
+                      className={`px-4 py-2 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap inline-flex items-center gap-2 ${
+                        vipUsersCategoryTab === 'ALL'
+                          ? 'bg-[#D4AF37] text-[#09090B]'
+                          : 'text-[#A1A1AA] hover:text-[#F5F5F7]'
+                      }`}
+                    >
+                      <span>All Registered Members</span>
+                      <span className="font-mono tabular-nums">({filteredAllUsers.length})</span>
+                    </button>
+                  </div>
+
+                  {/* CATEGORY 1: EXNESS VIP USERS */}
+                  {vipUsersCategoryTab === 'EXNESS' && (
+                    <div className="space-y-6">
+                      {pendingExnessReqs.length > 0 && (
+                        <div className="space-y-3">
+                          <h2 className="text-xs font-semibold tracking-wider text-[#E5C76B] uppercase">
+                            Pending Exness VIP Approvals ({pendingExnessReqs.length})
+                          </h2>
+                          {pendingExnessReqs.map((req) => (
+                            <div
+                              key={req.id}
+                              className="apple-surface rounded-2xl p-5 border border-[#D4AF37]/30 flex flex-col lg:flex-row lg:items-center justify-between gap-4"
+                            >
+                              <div className="space-y-1 text-xs">
+                                <p className="text-sm font-semibold text-[#F5F5F7]">
+                                  {req.name} · <span className="text-[#E5C76B]">PENDING EXNESS VIP</span>
+                                </p>
+                                <p className="text-[#A1A1AA]">
+                                  Email: {req.email} · Telegram: {req.telegram}
+                                </p>
+                                <p className="font-mono text-[#D1D1D6]">
+                                  Exness Account ID: {req.exnessId || '—'} · Submitted{' '}
+                                  {new Date(req.createdAtMs).toLocaleDateString()}
+                                </p>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => handleVipDecision(req, 'APPROVED')}
+                                  className="px-3.5 py-2 rounded-xl bg-[#30D158] text-[#09090B] text-xs font-semibold inline-flex items-center gap-1"
+                                >
+                                  <Check className="w-3.5 h-3.5" />
+                                  <span>Approve Exness VIP</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleVipDecision(req, 'REJECTED')}
+                                  className="px-3.5 py-2 rounded-xl bg-[#FF453A]/20 text-[#FF453A] text-xs font-semibold"
+                                >
+                                  Reject
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      <div className="space-y-3">
+                        <h2 className="text-xs font-semibold tracking-wider text-[#A1A1AA] uppercase">
+                          Exness VIP Users ({exnessUsers.length})
+                        </h2>
+                        {exnessUsers.length === 0 ? (
+                          <div className="apple-surface rounded-2xl p-8 text-center text-sm text-[#A1A1AA]">
+                            No Exness VIP users yet. Approve an Exness request above or assign a member from &ldquo;All Registered Members&rdquo;.
+                          </div>
+                        ) : (
+                          exnessUsers.map((u) => {
+                            const g = allGrants[u.uid];
+                            const exnessReq = vipRequests.find(
+                              (r) => r.userId === u.uid && r.method === 'EXNESS'
+                            );
+                            return (
+                              <div
+                                key={u.uid}
+                                className="apple-surface rounded-2xl p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4"
+                              >
+                                <div className="space-y-1 text-xs">
+                                  <p className="text-sm font-semibold text-[#F5F5F7]">
+                                    {u.name} · <span className="text-[#A1A1AA]">{u.email}</span>
+                                  </p>
+                                  <p className="text-[#A1A1AA] font-mono">
+                                    Category: <span className="text-[#E5C76B]">Exness VIP</span> ·
+                                    Exness ID: {exnessReq?.exnessId || 'Manual Grant'} · Telegram:{' '}
+                                    {u.telegram || exnessReq?.telegram || '—'} · Status:{' '}
+                                    <span
+                                      className={
+                                        g?.vipStatus === 'ACTIVE'
+                                          ? 'text-[#30D158]'
+                                          : 'text-[#FF453A]'
+                                      }
+                                    >
+                                      {g?.vipStatus || 'NONE'} ({g?.vipType || 'LIFETIME'})
+                                    </span>
+                                  </p>
+                                </div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  {g?.vipStatus !== 'ACTIVE' && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleManualUserVip(u.uid, 'EXNESS_LIFETIME')}
+                                      className="px-3 py-1.5 rounded-lg bg-[#30D158] text-[#09090B] text-xs font-semibold"
+                                    >
+                                      Re-Activate Exness VIP
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={() => handleManualUserVip(u.uid, 'REVOKE')}
+                                    className="px-3 py-1.5 rounded-lg bg-[#FF453A]/20 text-[#FF453A] text-xs font-semibold"
+                                  >
+                                    Revoke VIP
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* CATEGORY 2: BINANCE VIP USERS */}
+                  {vipUsersCategoryTab === 'BINANCE' && (
+                    <div className="space-y-6">
+                      {pendingBinanceReqs.length > 0 && (
+                        <div className="space-y-3">
+                          <h2 className="text-xs font-semibold tracking-wider text-[#E5C76B] uppercase">
+                            Pending Binance VIP Approvals ({pendingBinanceReqs.length})
+                          </h2>
+                          {pendingBinanceReqs.map((req) => (
+                            <div
+                              key={req.id}
+                              className="apple-surface rounded-2xl p-5 border border-[#D4AF37]/30 flex flex-col lg:flex-row lg:items-center justify-between gap-4"
+                            >
+                              <div className="space-y-1 text-xs">
+                                <p className="text-sm font-semibold text-[#F5F5F7]">
+                                  {req.name} · <span className="text-[#E5C76B]">PENDING BINANCE VIP</span>
+                                </p>
+                                <p className="text-[#A1A1AA]">
+                                  Email: {req.email} · Telegram: {req.telegram}
+                                </p>
+                                <p className="font-mono text-[#D1D1D6]">
+                                  Binance Pay TxID: {req.transactionId || '—'} · Submitted{' '}
+                                  {new Date(req.createdAtMs).toLocaleDateString()}
+                                </p>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => handleVipDecision(req, 'APPROVED')}
+                                  className="px-3.5 py-2 rounded-xl bg-[#30D158] text-[#09090B] text-xs font-semibold inline-flex items-center gap-1"
+                                >
+                                  <Check className="w-3.5 h-3.5" />
+                                  <span>Approve Binance VIP (30d)</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleVipDecision(req, 'REJECTED')}
+                                  className="px-3.5 py-2 rounded-xl bg-[#FF453A]/20 text-[#FF453A] text-xs font-semibold"
+                                >
+                                  Reject
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      <div className="space-y-3">
+                        <h2 className="text-xs font-semibold tracking-wider text-[#A1A1AA] uppercase">
+                          Binance VIP Users ({binanceUsers.length})
+                        </h2>
+                        {binanceUsers.length === 0 ? (
+                          <div className="apple-surface rounded-2xl p-8 text-center text-sm text-[#A1A1AA]">
+                            No Binance VIP users yet. Approve a Binance Pay request above or assign a member from &ldquo;All Registered Members&rdquo;.
+                          </div>
+                        ) : (
+                          binanceUsers.map((u) => {
+                            const g = allGrants[u.uid];
+                            const binanceReq = vipRequests.find(
+                              (r) => r.userId === u.uid && r.method === 'BINANCE'
+                            );
+                            return (
+                              <div
+                                key={u.uid}
+                                className="apple-surface rounded-2xl p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4"
+                              >
+                                <div className="space-y-1 text-xs">
+                                  <p className="text-sm font-semibold text-[#F5F5F7]">
+                                    {u.name} · <span className="text-[#A1A1AA]">{u.email}</span>
+                                  </p>
+                                  <p className="text-[#A1A1AA] font-mono">
+                                    Category: <span className="text-[#E5C76B]">Binance VIP</span> ·
+                                    TxID: {binanceReq?.transactionId || 'Manual Grant'} · Telegram:{' '}
+                                    {u.telegram || binanceReq?.telegram || '—'} · Status:{' '}
+                                    <span
+                                      className={
+                                        g?.vipStatus === 'ACTIVE'
+                                          ? 'text-[#30D158]'
+                                          : 'text-[#FF453A]'
+                                      }
+                                    >
+                                      {g?.vipStatus || 'NONE'}
+                                    </span>
+                                    {g?.vipExpiryMs
+                                      ? ` · Expires ${new Date(g.vipExpiryMs).toLocaleDateString()}`
+                                      : ''}
+                                  </p>
+                                </div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleManualUserVip(u.uid, 'BINANCE_30D')}
+                                    className="px-3 py-1.5 rounded-lg bg-[#D4AF37] text-[#09090B] text-xs font-semibold"
+                                  >
+                                    +30 Days Binance VIP
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleManualUserVip(u.uid, 'REVOKE')}
+                                    className="px-3 py-1.5 rounded-lg bg-[#FF453A]/20 text-[#FF453A] text-xs font-semibold"
+                                  >
+                                    Revoke VIP
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* CATEGORY 3: ALL REGISTERED MEMBERS */}
+                  {vipUsersCategoryTab === 'ALL' && (
+                    <div className="space-y-3">
+                      {filteredAllUsers.map((u) => {
+                        const g = allGrants[u.uid];
+                        const cat = resolveUserVipCategory(u.uid);
+                        return (
+                          <div
+                            key={u.uid}
+                            className="apple-surface rounded-2xl p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4"
+                          >
+                            <div className="space-y-1 text-xs">
+                              <p className="text-sm font-semibold text-[#F5F5F7]">
+                                {u.name} · <span className="text-[#A1A1AA]">{u.email}</span>
+                              </p>
+                              <p className="text-[#A1A1AA] font-mono">
+                                Telegram: {u.telegram || '—'} · Category:{' '}
+                                <span className="text-[#E5C76B]">{cat}</span> · Status:{' '}
+                                {g?.vipStatus || 'NONE'}
+                                {g?.vipType === 'MONTHLY' &&
+                                  ` · Expires ${new Date(g.vipExpiryMs).toLocaleDateString()}`}
+                              </p>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => handleManualUserVip(u.uid, 'EXNESS_LIFETIME')}
+                                className="px-3 py-1.5 rounded-lg bg-[#D4AF37] text-[#09090B] text-xs font-semibold"
+                              >
+                                Assign Exness VIP
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleManualUserVip(u.uid, 'BINANCE_30D')}
+                                className="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-xs font-semibold"
+                              >
+                                Assign Binance VIP (+30d)
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleManualUserVip(u.uid, 'REVOKE')}
+                                className="px-3 py-1.5 rounded-lg bg-[#FF453A]/20 text-[#FF453A] text-xs font-semibold"
+                              >
+                                Revoke VIP
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </>
+              );
+            })()}
           </div>
         )}
 
@@ -2794,6 +3963,76 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Modal for Settling Signal as CLOSED with Exact Realized Pips */}
+      {closingSignalModal && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 bg-black/75 backdrop-blur-md flex items-center justify-center p-4"
+        >
+          <form
+            onSubmit={async (e) => {
+              e.preventDefault();
+              const sig = closingSignalModal.signal;
+              const parsedPips = Number(closingSignalModal.pipsInput);
+              const safePips = Number.isFinite(parsedPips) ? Math.round(parsedPips) : 0;
+              setClosingSignalModal(null);
+              await handleMarkSignalOutcome(sig, 'CLOSED', safePips);
+            }}
+            className="w-full max-w-sm apple-window rounded-2xl p-6 space-y-4"
+          >
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-semibold text-[#F5F5F7]">
+                Close Signal ({closingSignalModal.signal.currency} {closingSignalModal.signal.direction})
+              </h3>
+              <button
+                type="button"
+                onClick={() => setClosingSignalModal(null)}
+                className="text-[#8E8E93] hover:text-[#F5F5F7]"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <p className="text-xs text-[#A1A1AA] leading-relaxed">
+              Enter the exact realized pips for this closed trade (e.g. <span className="font-mono text-[#F5F5F7]">0</span> for breakeven, <span className="font-mono text-[#30D158]">45</span> for partial profit, or <span className="font-mono text-[#FF453A]">-20</span> for manual stop).
+            </p>
+            <div>
+              <label className="block text-[11px] font-medium text-[#A1A1AA] mb-1">
+                Realized Pips
+              </label>
+              <input
+                type="number"
+                step="1"
+                required
+                value={closingSignalModal.pipsInput}
+                onChange={(e) =>
+                  setClosingSignalModal({
+                    ...closingSignalModal,
+                    pipsInput: e.target.value,
+                  })
+                }
+                className="w-full px-3.5 py-2.5 rounded-xl bg-white/[0.05] border border-white/15 text-sm font-mono tabular-nums text-[#F5F5F7]"
+              />
+            </div>
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setClosingSignalModal(null)}
+                className="px-4 py-2 rounded-xl bg-white/10 text-xs font-medium text-[#F5F5F7]"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="px-4 py-2 rounded-xl bg-[#D4AF37] text-[#09090B] text-xs font-semibold"
+              >
+                Save Closed Pips
+              </button>
+            </div>
+          </form>
         </div>
       )}
     </div>

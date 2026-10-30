@@ -107,11 +107,17 @@ export const DIRTY_DOZEN_CASES: AdversarialCase[] = [
   },
   {
     id: 11,
-    name: 'Orphaned Book Purchase for Nonexistent Book',
-    collection: '/bookPurchases/pur_ghost',
+    name: 'Market Analysis Reaction Identity Spoof & Vote Stuffing',
+    collection: '/marketAnalysisReactions/ma_01_user_02',
     operation: 'create',
     auth: { uid: 'user_01', email: 'user1@example.com', email_verified: true },
-    payload: { bookId: 'nonexistent_book_99' },
+    payload: {
+      id: 'ma_01_user_02',
+      videoId: 'ma_01',
+      userId: 'user_02',
+      reaction: 'LIKE',
+      status: 'ACTIVE',
+    },
     expectedOutcome: 'PERMISSION_DENIED',
   },
   {

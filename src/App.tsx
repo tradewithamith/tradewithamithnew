@@ -9,7 +9,12 @@ import { AcademyProvider, useAcademy } from './context/AcademyContext';
 import { AppleBottomDock, AppleTopBar, WORKSPACE_NAV_ITEMS } from './components/AppleHeaderAndDock';
 import { HomeWindow } from './components/HomeWindow';
 import { MacWindow } from './components/MacWindow';
-import { FreePdfsWindow, PaidPdfsWindow, VideosWindow } from './components/MediaWindows';
+import {
+  FreePdfsWindow,
+  MarketAnalysisWindow,
+  PaidPdfsWindow,
+  VideosWindow,
+} from './components/MediaWindows';
 import {
   InstallAppModal,
   NotificationCenter,
@@ -26,7 +31,14 @@ const AdminDashboard = lazy(() =>
   import('./components/AdminDashboard').then((m) => ({ default: m.AdminDashboard }))
 );
 
-const VALID_WINDOWS: WindowId[] = ['home', 'signals', 'videos', 'free-pdfs', 'paid-pdfs'];
+const VALID_WINDOWS: WindowId[] = [
+  'home',
+  'signals',
+  'market-analysis',
+  'videos',
+  'free-pdfs',
+  'paid-pdfs',
+];
 
 function detectInitialPage(): StaticPageId {
   if (typeof document !== 'undefined') {
@@ -127,6 +139,11 @@ const WINDOW_META: Record<
     subtitle: 'XAUUSD Institutional Execution & Pip Calculator',
     offset: { x: 22, y: 18 },
   },
+  'market-analysis': {
+    title: 'Market Analysis',
+    subtitle: 'XAUUSD Gold Breakdowns & Session Storyline',
+    offset: { x: 14, y: 20 },
+  },
   videos: {
     title: 'Video Masterclasses',
     subtitle: 'MSNR Structure & Storyline Education',
@@ -157,6 +174,7 @@ const WorkspaceShell: React.FC = () => {
   const [openWindows, setOpenWindows] = useState<Record<WindowId, boolean>>(() => ({
     home: true,
     signals: initialTarget === 'signals',
+    'market-analysis': initialTarget === 'market-analysis',
     videos: initialTarget === 'videos',
     'free-pdfs': initialTarget === 'free-pdfs',
     'paid-pdfs': initialTarget === 'paid-pdfs',
@@ -165,6 +183,7 @@ const WorkspaceShell: React.FC = () => {
   const [minimizedWindows, setMinimizedWindows] = useState<Record<WindowId, boolean>>({
     home: false,
     signals: false,
+    'market-analysis': false,
     videos: false,
     'free-pdfs': false,
     'paid-pdfs': false,
@@ -173,6 +192,7 @@ const WorkspaceShell: React.FC = () => {
   const [maximizedWindows, setMaximizedWindows] = useState<Record<WindowId, boolean>>({
     home: false,
     signals: false,
+    'market-analysis': false,
     videos: false,
     'free-pdfs': false,
     'paid-pdfs': false,
@@ -181,6 +201,7 @@ const WorkspaceShell: React.FC = () => {
   const [zMap, setZMap] = useState<Record<WindowId, number>>(() => ({
     home: initialTarget === 'home' ? 12 : 10,
     signals: initialTarget === 'signals' ? 14 : 11,
+    'market-analysis': initialTarget === 'market-analysis' ? 14 : 11,
     videos: initialTarget === 'videos' ? 14 : 11,
     'free-pdfs': initialTarget === 'free-pdfs' ? 14 : 11,
     'paid-pdfs': initialTarget === 'paid-pdfs' ? 14 : 11,
@@ -311,6 +332,8 @@ const WorkspaceShell: React.FC = () => {
         );
       case 'signals':
         return <SignalsWindow onOpenVipJoin={() => setVipModalOpen(true)} />;
+      case 'market-analysis':
+        return <MarketAnalysisWindow />;
       case 'videos':
         return <VideosWindow />;
       case 'free-pdfs':
@@ -321,7 +344,7 @@ const WorkspaceShell: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-[#070709] text-[#F5F5F7] relative overflow-x-hidden flex flex-col">
+    <div className="min-h-screen bg-[#070709] text-[#F5F5F7] relative overflow-x-clip flex flex-col">
       {/* Subtle Apple Spatial Ambient Background */}
       <div
         aria-hidden="true"

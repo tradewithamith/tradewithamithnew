@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useMemo, useState, useCall
 import { onAuthStateChanged, type User } from 'firebase/auth';
 import {
   collection,
+  deleteDoc,
   doc,
   getDoc,
   onSnapshot,
@@ -33,18 +34,23 @@ import {
 } from '../lib/integrations';
 import {
   DEFAULT_SETTINGS,
+  LEGACY_DEMO_SIGNAL_IDS,
   STARTER_FREE_BOOKS,
   STARTER_PAID_BOOKS,
-  STARTER_SIGNALS_PUBLIC,
   STARTER_VIDEOS,
   type AcademySettings,
   type AcademyVideo,
   type AppNotification,
   type BookAccessItem,
   type FreeBook,
+  type MarketAnalysisReaction,
+  type MarketAnalysisReactionSummary,
+  type MarketAnalysisVideo,
   type MergedSignal,
   type PaidBookPublic,
   type UserProfile,
+  type VideoReactionType,
+  type VipCategory,
   type VipGrant,
   type VipSignalPrivate,
   type VipSignalPublic,
@@ -70,6 +76,8 @@ interface AcademyContextValue {
   subscriberCount: string;
   signals: MergedSignal[];
   videos: AcademyVideo[];
+  marketAnalysisVideos: MarketAnalysisVideo[];
+  marketAnalysisReactionsSummary: Record<string, MarketAnalysisReactionSummary>;
   freeBooks: FreeBook[];
   paidBooks: PaidBookPublic[];
   bookAccessMap: Record<string, BookAccessItem>;
@@ -99,6 +107,7 @@ interface AcademyContextValue {
   }) => Promise<void>;
   incrementFreeBookMetric: (book: FreeBook, field: 'views' | 'downloads') => Promise<void>;
   getProtectedPaidBookUrl: (bookId: string) => Promise<string | null>;
+  toggleMarketAnalysisReaction: (videoId: string, reaction: VideoReactionType) => Promise<void>;
 }
 
 const AcademyContext = createContext<AcademyContextValue | null>(null);
@@ -117,6 +126,8 @@ export const AcademyProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [signalsPrivateMap, setSignalsPrivateMap] = useState<Record<string, VipSignalPrivate>>({});
 
   const [dbVideos, setDbVideos] = useState<AcademyVideo[] | null>(null);
+  const [dbMarketAnalysisVideos, setDbMarketAnalysisVideos] = useState<MarketAnalysisVideo[]>([]);
+  const [dbMarketAnalysisReactions, setDbMarketAnalysisReactions] = useState<MarketAnalysisReaction[]>([]);
   const [dbFreeBooks, setDbFreeBooks] = useState<FreeBook[] | null>(null);
   const [dbPaidBooks, setDbPaidBooks] = useState<PaidBookPublic[] | null>(null);
 
@@ -340,6 +351,7 @@ export const AcademyProvider: React.FC<{ children: React.ReactNode }> = ({ child
             vipStatus: raw.vipStatus,
             vipType: raw.vipType,
             approvalStatus: raw.approvalStatus,
+            vipCategory: (raw.vipCategory as VipCategory | undefined) || undefined,
             vipExpiryMs: tsToMs(raw.vipExpiry, 0),
           });
         } else {
@@ -420,6 +432,8 @@ export const AcademyProvider: React.FC<{ children: React.ReactNode }> = ({ child
         }
         const list: VipSignalPublic[] = [];
         snap.forEach((d) => {
+          // Exclude any legacy starter/demo signal IDs so only real admin-published signals appear
+          if (LEGACY_DEMO_SIGNAL_IDS.has(d.id)) return;
           const raw = d.data();
           list.push({
             id: d.id,
@@ -428,7 +442,7 @@ export const AcademyProvider: React.FC<{ children: React.ReactNode }> = ({ child
             direction: raw.direction,
             orderType: raw.orderType,
             result: raw.result,
-            pips: raw.pips,
+            pips: raw.result === 'ACTIVE' ? 0 : Number(raw.pips) || 0,
             createdAtMs: tsToMs(raw.createdAt),
           });
         });
@@ -546,89 +560,80 @@ export const AcademyProvider: React.FC<{ children: React.ReactNode }> = ({ child
       () => {}
     );
 
+    const marketVideosQ = query(
+      collection(db, 'marketAnalysisVideos'),
+      where('status', '==', 'ACTIVE')
+    );
+    const unsubMarketVideos = onSnapshot(
+      marketVideosQ,
+      (snap) => {
+        const list: MarketAnalysisVideo[] = [];
+        snap.forEach((d) => {
+          const raw = d.data();
+          list.push({
+            id: d.id,
+            title: raw.title,
+            youtubeUrl: raw.youtubeUrl,
+            thumbnail: raw.thumbnail,
+            description: raw.description,
+            date: raw.date,
+            status: raw.status,
+            createdAtMs: tsToMs(raw.createdAt),
+          });
+        });
+        setDbMarketAnalysisVideos(list.sort((a, b) => b.createdAtMs - a.createdAtMs));
+      },
+      (err) => console.warn('Market analysis videos listener:', err)
+    );
+
+    const marketReactionsQ = query(
+      collection(db, 'marketAnalysisReactions'),
+      where('status', '==', 'ACTIVE')
+    );
+    const unsubMarketReactions = onSnapshot(
+      marketReactionsQ,
+      (snap) => {
+        const list: MarketAnalysisReaction[] = [];
+        snap.forEach((d) => {
+          const raw = d.data();
+          list.push({
+            id: d.id,
+            videoId: raw.videoId,
+            userId: raw.userId,
+            reaction: raw.reaction,
+            status: 'ACTIVE',
+            createdAtMs: tsToMs(raw.createdAt),
+          });
+        });
+        setDbMarketAnalysisReactions(list);
+      },
+      (err) => console.warn('Market analysis reactions listener:', err)
+    );
+
     return () => {
       unsubSignals();
       unsubVideos();
       unsubFree();
       unsubPaid();
       unsubNotifs();
+      unsubMarketVideos();
+      unsubMarketReactions();
     };
   }, []);
 
   // 6. Fetch Protected Signal Execution Prices ONLY when user is Active VIP or Admin
-  const activeSignalsSource =
-    dbSignalsPublic && dbSignalsPublic.length > 0 ? dbSignalsPublic : STARTER_SIGNALS_PUBLIC;
+  // Never fall back to fake starter signals — only real admin-published signals are displayed.
+  const activeSignalsSource = useMemo(() => dbSignalsPublic ?? [], [dbSignalsPublic]);
 
   useEffect(() => {
-    if (!isVipActive || !user) {
+    if (!isVipActive || !user || activeSignalsSource.length === 0) {
       setSignalsPrivateMap({});
-      return;
-    }
-
-    if (!dbSignalsPublic || dbSignalsPublic.length === 0) {
-      // Starter preview private levels for VIP / Admin before custom signals are created
-      setSignalsPrivateMap({
-        sig_xau_active_01: {
-          id: 'sig_xau_active_01',
-          currency: 'XAUUSD',
-          entry: 4140,
-          tp: 4150,
-          extraTp: 4160,
-          sl: 4128,
-          note: 'Wait for M15 candlestick body close confirmation at fresh H4 MSNR support before entry.',
-        },
-        sig_xau_active_02: {
-          id: 'sig_xau_active_02',
-          currency: 'XAUUSD',
-          entry: 4162,
-          tp: 4150,
-          extraTp: 4142,
-          sl: 4171,
-          note: 'Fresh Daily A-level rejection during London open. Secure 70% at TP1 and move SL to breakeven.',
-        },
-        sig_xau_hist_01: {
-          id: 'sig_xau_hist_01',
-          currency: 'XAUUSD',
-          entry: 4118,
-          tp: 4132.5,
-          extraTp: 4140,
-          sl: 4109,
-          note: 'NY session sweep of Asian low directly into unmitigated H4 Gap level.',
-        },
-        sig_xau_hist_02: {
-          id: 'sig_xau_hist_02',
-          currency: 'XAUUSD',
-          entry: 4155,
-          tp: 4142,
-          extraTp: 4134,
-          sl: 4161.5,
-          note: 'Invalidated on high-impact CPI impulse break above H1 roadblock.',
-        },
-        sig_xau_hist_03: {
-          id: 'sig_xau_hist_03',
-          currency: 'XAUUSD',
-          entry: 4105,
-          tp: 4116,
-          extraTp: 4125,
-          sl: 4097,
-          note: 'Clean RBS flip retest with zero drawdown.',
-        },
-        sig_xau_hist_04: {
-          id: 'sig_xau_hist_04',
-          currency: 'XAUUSD',
-          entry: 4148,
-          tp: 4140.5,
-          extraTp: 4132,
-          sl: 4156,
-          note: 'Closed manually ahead of FOMC minutes at +75 pips.',
-        },
-      });
       return;
     }
 
     let cancelled = false;
     Promise.all(
-      dbSignalsPublic.map(async (sig) => {
+      activeSignalsSource.map(async (sig) => {
         try {
           const snap = await getDoc(doc(db, 'vipSignalsPrivate', sig.id));
           if (snap.exists()) {
@@ -663,7 +668,7 @@ export const AcademyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return () => {
       cancelled = true;
     };
-  }, [isVipActive, user, dbSignalsPublic]);
+  }, [isVipActive, user, activeSignalsSource]);
 
   const signals: MergedSignal[] = useMemo(() => {
     return activeSignalsSource.map((pub) => {
@@ -673,10 +678,32 @@ export const AcademyProvider: React.FC<{ children: React.ReactNode }> = ({ child
   }, [activeSignalsSource, isVipActive, signalsPrivateMap]);
 
   const videos = dbVideos && dbVideos.length > 0 ? dbVideos : STARTER_VIDEOS;
+  const marketAnalysisVideos = dbMarketAnalysisVideos;
+
+  const marketAnalysisReactionsSummary = useMemo(() => {
+    const summary: Record<string, MarketAnalysisReactionSummary> = {};
+    const currentUid = user?.uid || null;
+
+    for (const r of dbMarketAnalysisReactions) {
+      if (!summary[r.videoId]) {
+        summary[r.videoId] = { likes: 0, dislikes: 0, userReaction: null };
+      }
+      if (r.reaction === 'LIKE') {
+        summary[r.videoId].likes += 1;
+      } else if (r.reaction === 'DISLIKE') {
+        summary[r.videoId].dislikes += 1;
+      }
+      if (currentUid && r.userId === currentUid) {
+        summary[r.videoId].userReaction = r.reaction;
+      }
+    }
+
+    return summary;
+  }, [dbMarketAnalysisReactions, user]);
+
   const freeBooks = dbFreeBooks && dbFreeBooks.length > 0 ? dbFreeBooks : STARTER_FREE_BOOKS;
   const paidBooks = dbPaidBooks && dbPaidBooks.length > 0 ? dbPaidBooks : STARTER_PAID_BOOKS;
   const usingStarterCatalog =
-    (dbSignalsPublic?.length ?? 0) === 0 &&
     (dbVideos?.length ?? 0) === 0 &&
     (dbFreeBooks?.length ?? 0) === 0 &&
     (dbPaidBooks?.length ?? 0) === 0;
@@ -905,6 +932,51 @@ export const AcademyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
   }, []);
 
+  const toggleMarketAnalysisReaction = useCallback(
+    async (videoId: string, reaction: VideoReactionType): Promise<void> => {
+      let activeUser = auth.currentUser;
+      if (!activeUser) {
+        const res = await signInWithGoogle();
+        activeUser = res.user;
+      }
+      if (!activeUser || !activeUser.emailVerified) {
+        throw new Error('Sign in with Google to like or dislike Market Analysis videos.');
+      }
+
+      const reactionId = `${videoId}_${activeUser.uid}`;
+      const path = `marketAnalysisReactions/${reactionId}`;
+      const reactionRef = doc(db, 'marketAnalysisReactions', reactionId);
+
+      try {
+        const snap = await getDoc(reactionRef);
+        if (snap.exists()) {
+          const existing = snap.data() as { reaction?: VideoReactionType };
+          if (existing.reaction === reaction) {
+            await deleteDoc(reactionRef);
+          } else {
+            await updateDoc(reactionRef, {
+              reaction,
+              updatedAt: serverTimestamp(),
+            });
+          }
+        } else {
+          await setDoc(reactionRef, {
+            id: reactionId,
+            videoId,
+            userId: activeUser.uid,
+            reaction,
+            status: 'ACTIVE',
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          });
+        }
+      } catch (error) {
+        handleFirestoreError(error, OperationType.WRITE, path);
+      }
+    },
+    []
+  );
+
   const value: AcademyContextValue = {
     user,
     authReady,
@@ -916,6 +988,8 @@ export const AcademyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     subscriberCount,
     signals,
     videos,
+    marketAnalysisVideos,
+    marketAnalysisReactionsSummary,
     freeBooks,
     paidBooks,
     bookAccessMap,
@@ -933,6 +1007,7 @@ export const AcademyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     submitBookPurchase,
     incrementFreeBookMetric,
     getProtectedPaidBookUrl,
+    toggleMarketAnalysisReaction,
   };
 
   return <AcademyContext.Provider value={value}>{children}</AcademyContext.Provider>;

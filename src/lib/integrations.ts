@@ -313,23 +313,56 @@ export async function recordUniqueAuthenticatedVisit(uid: string): Promise<void>
   }
 }
 
-export function extractYoutubeEmbedUrl(rawUrl: string): string | null {
-  const trimmed = rawUrl.trim();
+export function extractYoutubeVideoId(rawUrl: string): string | null {
+  const trimmed = (rawUrl || '').trim();
+  if (!trimmed) return null;
+
+  if (/^[a-zA-Z0-9_-]{11}$/.test(trimmed)) {
+    return trimmed;
+  }
+
+  try {
+    const parsed = new URL(trimmed);
+    const host = parsed.hostname.toLowerCase();
+    if (host === 'youtu.be' || host.endsWith('.youtu.be')) {
+      const id = parsed.pathname.split('/').filter(Boolean)[0] || '';
+      if (/^[a-zA-Z0-9_-]{11}$/.test(id)) return id;
+    }
+    if (host.includes('youtube.com') || host.includes('youtube-nocookie.com')) {
+      const vParam = parsed.searchParams.get('v');
+      if (vParam && /^[a-zA-Z0-9_-]{11}$/.test(vParam)) return vParam;
+
+      const segments = parsed.pathname.split('/').filter(Boolean);
+      const markerIdx = segments.findIndex((s) =>
+        ['embed', 'shorts', 'live', 'v'].includes(s.toLowerCase())
+      );
+      if (markerIdx !== -1 && segments[markerIdx + 1]) {
+        const candidate = segments[markerIdx + 1];
+        if (/^[a-zA-Z0-9_-]{11}$/.test(candidate)) return candidate;
+      }
+    }
+  } catch {
+    // Fallback to regex matching below
+  }
+
   const regExp =
-    /(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/;
+    /(?:youtube(?:-nocookie)?\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/|live\/|v\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/;
   const match = trimmed.match(regExp);
-  if (match?.[1]) {
-    return `https://www.youtube.com/embed/${match[1]}?autoplay=1&rel=0`;
+  return match?.[1] || null;
+}
+
+export function extractYoutubeEmbedUrl(rawUrl: string): string | null {
+  const videoId = extractYoutubeVideoId(rawUrl);
+  if (videoId) {
+    return `https://www.youtube.com/embed/${videoId}?autoplay=1&rel=0&modestbranding=1`;
   }
   return null;
 }
 
 export function extractYoutubeThumbnail(rawUrl: string, fallback: string): string {
-  const regExp =
-    /(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/;
-  const match = rawUrl.trim().match(regExp);
-  if (match?.[1]) {
-    return `https://i.ytimg.com/vi/${match[1]}/hqdefault.jpg`;
+  const videoId = extractYoutubeVideoId(rawUrl);
+  if (videoId) {
+    return `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
   }
   return fallback;
 }

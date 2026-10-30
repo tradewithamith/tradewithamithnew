@@ -14,7 +14,7 @@ export const ASSETS = {
   videoThumb: videoThumbImg,
 };
 
-export type WindowId = 'home' | 'signals' | 'videos' | 'free-pdfs' | 'paid-pdfs';
+export type WindowId = 'home' | 'signals' | 'market-analysis' | 'videos' | 'free-pdfs' | 'paid-pdfs';
 
 export type StaticPageId = 'workspace' | 'terms' | 'privacy' | 'about' | 'contact' | 'admin';
 
@@ -25,6 +25,7 @@ export type SignalResult = 'ACTIVE' | 'TP HIT' | 'SL HIT' | 'CLOSED';
 export type VipType = 'NONE' | 'LIFETIME' | 'MONTHLY' | 'CUSTOM';
 export type VipStatus = 'NONE' | 'ACTIVE' | 'EXPIRED' | 'REVOKED';
 export type ApprovalStatus = 'NONE' | 'PENDING' | 'APPROVED' | 'REJECTED';
+export type VipCategory = 'NONE' | 'EXNESS' | 'BINANCE' | 'CUSTOM';
 
 export interface UserProfile {
   uid: string;
@@ -41,6 +42,7 @@ export interface VipGrant {
   vipStatus: VipStatus;
   vipType: VipType;
   approvalStatus: ApprovalStatus;
+  vipCategory?: VipCategory;
   vipExpiryMs: number;
   updatedAt?: unknown;
 }
@@ -97,6 +99,34 @@ export interface AcademyVideo {
   date: string;
   status: 'ACTIVE' | 'INACTIVE';
   createdAtMs: number;
+}
+
+export interface MarketAnalysisVideo {
+  id: string;
+  title: string;
+  youtubeUrl: string;
+  thumbnail: string;
+  description: string;
+  date: string;
+  status: 'ACTIVE' | 'INACTIVE';
+  createdAtMs: number;
+}
+
+export type VideoReactionType = 'LIKE' | 'DISLIKE';
+
+export interface MarketAnalysisReaction {
+  id: string;
+  videoId: string;
+  userId: string;
+  reaction: VideoReactionType;
+  status: 'ACTIVE';
+  createdAtMs: number;
+}
+
+export interface MarketAnalysisReactionSummary {
+  likes: number;
+  dislikes: number;
+  userReaction: VideoReactionType | null;
 }
 
 export interface FreeBook {
@@ -243,68 +273,17 @@ export const DEFAULT_SETTINGS: AcademySettings = {
 const now = Date.now();
 const dayMs = 86_400_000;
 
-export const STARTER_SIGNALS_PUBLIC: VipSignalPublic[] = [
-  {
-    id: 'sig_xau_active_01',
-    date: new Date(now - 2 * 3600_000).toISOString().slice(0, 10),
-    currency: 'XAUUSD',
-    direction: 'BUY',
-    orderType: 'LIMIT',
-    result: 'ACTIVE',
-    pips: 100,
-    createdAtMs: now - 2 * 3600_000,
-  },
-  {
-    id: 'sig_xau_active_02',
-    date: new Date(now - 5 * 3600_000).toISOString().slice(0, 10),
-    currency: 'XAUUSD',
-    direction: 'SELL',
-    orderType: 'LIMIT',
-    result: 'TP HIT',
-    pips: 120,
-    createdAtMs: now - 5 * 3600_000,
-  },
-  {
-    id: 'sig_xau_hist_01',
-    date: new Date(now - 1 * dayMs).toISOString().slice(0, 10),
-    currency: 'XAUUSD',
-    direction: 'BUY',
-    orderType: 'MARKET',
-    result: 'TP HIT',
-    pips: 145,
-    createdAtMs: now - 1 * dayMs,
-  },
-  {
-    id: 'sig_xau_hist_02',
-    date: new Date(now - 2 * dayMs).toISOString().slice(0, 10),
-    currency: 'XAUUSD',
-    direction: 'SELL',
-    orderType: 'LIMIT',
-    result: 'SL HIT',
-    pips: -65,
-    createdAtMs: now - 2 * dayMs,
-  },
-  {
-    id: 'sig_xau_hist_03',
-    date: new Date(now - 3 * dayMs).toISOString().slice(0, 10),
-    currency: 'XAUUSD',
-    direction: 'BUY',
-    orderType: 'LIMIT',
-    result: 'TP HIT',
-    pips: 110,
-    createdAtMs: now - 3 * dayMs,
-  },
-  {
-    id: 'sig_xau_hist_04',
-    date: new Date(now - 5 * dayMs).toISOString().slice(0, 10),
-    currency: 'XAUUSD',
-    direction: 'SELL',
-    orderType: 'MARKET',
-    result: 'CLOSED',
-    pips: 75,
-    createdAtMs: now - 5 * dayMs,
-  },
-];
+export const LEGACY_DEMO_SIGNAL_IDS: ReadonlySet<string> = new Set([
+  'sig_xau_active_01',
+  'sig_xau_active_02',
+  'sig_xau_hist_01',
+  'sig_xau_hist_02',
+  'sig_xau_hist_03',
+  'sig_xau_hist_04',
+]);
+
+// No fake or auto-generated signals — pips are ONLY counted from real admin-published signals.
+export const STARTER_SIGNALS_PUBLIC: VipSignalPublic[] = [];
 
 export const STARTER_VIDEOS: AcademyVideo[] = [
   {
@@ -348,7 +327,7 @@ export const STARTER_FREE_BOOKS: FreeBook[] = [
     name: 'MSNR Foundations: Fresh Unmitigated Levels',
     description:
       'Essential field manual covering classical Malaysian A/V levels, OC-Gaps, and clean chart markup rules for XAUUSD beginners and intermediates.',
-    coverUrl: ASSETS.bookMsnr,
+    coverUrl: '',
     pdfUrl: '/api/sample-pdf/msnr-foundations',
     views: 1420,
     downloads: 864,
@@ -360,7 +339,7 @@ export const STARTER_FREE_BOOKS: FreeBook[] = [
     name: 'XAUUSD London & NY Session Pre-Trade Checklist',
     description:
       'Concise one-page institutional execution rubric verifying HTF roadblocks, session liquidity sweeps, and pip risk before placing orders.',
-    coverUrl: ASSETS.bookXauusd,
+    coverUrl: '',
     pdfUrl: '/api/sample-pdf/xauusd-session-checklist',
     views: 980,
     downloads: 612,

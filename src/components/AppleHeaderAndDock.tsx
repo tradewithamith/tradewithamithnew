@@ -5,6 +5,7 @@ import {
   Crown,
   FileText,
   Home,
+  LineChart,
   PlaySquare,
 } from 'lucide-react';
 import { useAcademy } from '../context/AcademyContext';
@@ -21,8 +22,9 @@ interface NavConfig {
 export const WORKSPACE_NAV_ITEMS: NavConfig[] = [
   { id: 'home', label: 'Home', shortLabel: 'Home', icon: Home },
   { id: 'signals', label: 'VIP Signals', shortLabel: 'Signals', icon: BarChart3 },
+  { id: 'market-analysis', label: 'Market Analysis', shortLabel: 'Analysis', icon: LineChart },
   { id: 'videos', label: 'Videos', shortLabel: 'Videos', icon: PlaySquare },
-  { id: 'free-pdfs', label: 'Free PDFs', shortLabel: 'Free Books', icon: FileText },
+  { id: 'free-pdfs', label: 'Free PDFs', shortLabel: 'Free PDFs', icon: FileText },
   { id: 'paid-pdfs', label: 'Paid PDFs', shortLabel: 'Bookstore', icon: BookOpen },
 ];
 
@@ -72,8 +74,8 @@ export const AppleTopBar: React.FC<HeaderProps> = ({
           </span>
         </a>
 
-        {/* Zone 2: 5 Concise Single-Line Desktop Navigation Links */}
-        <nav aria-label="Primary" className="hidden md:flex items-center gap-7 text-sm font-medium">
+        {/* Zone 2: Concise Single-Line Desktop Navigation Links */}
+        <nav aria-label="Primary" className="hidden lg:flex items-center gap-5 xl:gap-7 text-sm font-medium">
           {WORKSPACE_NAV_ITEMS.map((item) => {
             const isActive = !isStaticPage && activeWindow === item.id;
             return (
@@ -225,7 +227,7 @@ export const AppleBottomDock: React.FC<DockProps> = ({
         aria-label="Mobile Navigation"
         className="lg:hidden fixed bottom-0 inset-x-0 z-40 apple-glass border-t border-white/[0.09] pb-safe"
       >
-        <div className="grid grid-cols-5 px-2 pt-1.5">
+        <div className="grid grid-cols-6 px-1.5 pt-1.5">
           {WORKSPACE_NAV_ITEMS.map((item) => {
             const Icon = item.icon;
             const active = activeWindow === item.id;
@@ -238,8 +240,10 @@ export const AppleBottomDock: React.FC<DockProps> = ({
                   active ? 'text-[#E5C76B]' : 'text-[#A1A1AA] hover:text-[#F5F5F7]'
                 }`}
               >
-                <Icon className="w-5 h-5" />
-                <span className="text-[10px] font-medium whitespace-nowrap">{item.shortLabel}</span>
+                <Icon className="w-4 h-4 sm:w-5 sm:h-5" />
+                <span className="text-[9.5px] sm:text-[10px] font-medium whitespace-nowrap truncate max-w-full px-0.5">
+                  {item.shortLabel}
+                </span>
               </button>
             );
           })}
