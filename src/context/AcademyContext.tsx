@@ -210,6 +210,15 @@ export const AcademyProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   // 2. Public Settings & Visitor Statistics Listeners
   useEffect(() => {
+    const base = import.meta.env.BASE_URL || '/';
+    const resolveAsset = (url?: string) => {
+      if (!url) return '';
+      if (url.startsWith('/assets/')) {
+        return `${base}${url.slice(1)}`;
+      }
+      return url;
+    };
+
     const unsubSettings = onSnapshot(
       doc(db, 'settings', 'config'),
       (snap) => {
@@ -218,9 +227,13 @@ export const AcademyProvider: React.FC<{ children: React.ReactNode }> = ({ child
           const merged: AcademySettings = { ...DEFAULT_SETTINGS, ...data };
           if (!data.logoUrl || data.logoUrl.includes('brand_emblem_gold')) {
             merged.logoUrl = DEFAULT_SETTINGS.logoUrl;
+          } else {
+            merged.logoUrl = resolveAsset(merged.logoUrl);
           }
           if (!data.binanceQrUrl) {
             merged.binanceQrUrl = DEFAULT_SETTINGS.binanceQrUrl;
+          } else {
+            merged.binanceQrUrl = resolveAsset(merged.binanceQrUrl);
           }
           if (!data.youtubeChannelId) {
             merged.youtubeChannelId = DEFAULT_SETTINGS.youtubeChannelId;
