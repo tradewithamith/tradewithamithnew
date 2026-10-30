@@ -1,0 +1,191 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-display: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-sans: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+}
+
+@layer base {
+  html {
+    color-scheme: dark;
+    scroll-behavior: smooth;
+  }
+
+  html,
+  body {
+    overflow-x: hidden;
+    background-color: #070709;
+    color: #f5f5f7;
+    font-family: var(--font-sans);
+    letter-spacing: 0.008em;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Apple macOS / Vision Pro Dark-Glass & Gold Scrollbar Theme */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(212, 175, 55, 0.38) rgba(255, 255, 255, 0.025);
+  }
+
+  *::-webkit-scrollbar {
+    width: 9px;
+    height: 9px;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: rgba(10, 11, 15, 0.55);
+    border-radius: 9999px;
+    margin-block: 4px;
+    margin-inline: 4px;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    background: linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.22) 0%,
+      rgba(212, 175, 55, 0.42) 100%
+    );
+    border: 2px solid transparent;
+    background-clip: padding-box;
+    border-radius: 9999px;
+    min-height: 36px;
+  }
+
+  *::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(
+      180deg,
+      rgba(229, 199, 107, 0.68) 0%,
+      rgba(212, 175, 55, 0.85) 100%
+    );
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+
+  *::-webkit-scrollbar-thumb:active {
+    background: #d4af37;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+
+  *::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-family: var(--font-display);
+    text-wrap: balance;
+  }
+}
+
+.apple-glass {
+  background: rgba(20, 21, 26, 0.76);
+  backdrop-filter: blur(28px) saturate(165%);
+  -webkit-backdrop-filter: blur(28px) saturate(165%);
+  border: 1px solid rgba(255, 255, 255, 0.085);
+}
+
+.apple-window {
+  background: rgba(16, 17, 22, 0.86);
+  backdrop-filter: blur(36px) saturate(175%);
+  -webkit-backdrop-filter: blur(36px) saturate(175%);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  box-shadow: 0 32px 80px rgba(0, 0, 0, 0.65), 0 1px 0 rgba(255, 255, 255, 0.08) inset;
+}
+
+.apple-surface {
+  background: rgba(255, 255, 255, 0.032);
+  border: 1px solid rgba(255, 255, 255, 0.075);
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+.pb-safe {
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+}
+
+@keyframes floatSlow {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) rotateX(8deg) rotateY(-10deg);
+  }
+  50% {
+    transform: translate3d(0, -8px, 0) rotateX(-6deg) rotateY(10deg);
+  }
+}
+
+.emblem-3d-motion {
+  animation: floatSlow 9s ease-in-out infinite;
+  transform-style: preserve-3d;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .emblem-3d-motion {
+    animation: none !important;
+  }
+}
+
+/* Official Google Sign-In button styling per Workspace Integration guidelines */
+.gsi-material-button {
+  -moz-user-select: none;
+  -webkit-user-select: none;
+  -ms-user-select: none;
+  -webkit-appearance: none;
+  background-color: #131314;
+  background-image: none;
+  border: 1px solid #8e918f;
+  border-radius: 10px;
+  box-sizing: border-box;
+  color: #e3e3e3;
+  cursor: pointer;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 14px;
+  height: 42px;
+  letter-spacing: 0.2px;
+  outline: none;
+  overflow: hidden;
+  padding: 0 14px;
+  position: relative;
+  text-align: center;
+  transition: background-color 0.18s, border-color 0.18s;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.gsi-material-button:hover {
+  background-color: #1f2023;
+  border-color: #d4af37;
+}
+
+.gsi-material-button .gsi-material-button-content-wrapper {
+  align-items: center;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  height: 100%;
+  justify-content: center;
+  position: relative;
+  width: 100%;
+  gap: 10px;
+}
+
+.gsi-material-button .gsi-material-button-icon {
+  height: 18px;
+  width: 18px;
+  min-width: 18px;
+}

@@ -1,0 +1,2663 @@
+import React, { useEffect, useState } from 'react';
+import {
+  ArrowLeft,
+  BarChart3,
+  Bell,
+  BookOpen,
+  Check,
+  Crown,
+  FileText,
+  FolderSync,
+  LayoutDashboard,
+  LogOut,
+  PlaySquare,
+  Plus,
+  Settings,
+  ShieldAlert,
+  Trash2,
+  Upload,
+  Users,
+  X,
+} from 'lucide-react';
+import {
+  collection,
+  deleteDoc,
+  doc,
+  getDoc,
+  onSnapshot,
+  serverTimestamp,
+  setDoc,
+  Timestamp,
+  updateDoc,
+  writeBatch,
+} from 'firebase/firestore';
+import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
+import { useAcademy } from '../context/AcademyContext';
+import {
+  calculateSignalPips,
+  clampStr,
+  db,
+  handleFirestoreError,
+  OperationType,
+  sanitizeId,
+  signInWithGoogle,
+  storage,
+} from '../lib/firebase';
+import {
+  extractYoutubeThumbnail,
+  fetchGoogleSheetRows,
+  normalizeTelegramUrl,
+  normalizeYoutubeChannelId,
+} from '../lib/integrations';
+import {
+  ASSETS,
+  STARTER_FREE_BOOKS,
+  STARTER_PAID_BOOKS,
+  STARTER_SIGNALS_PUBLIC,
+  STARTER_VIDEOS,
+  type AcademySettings,
+  type AcademyVideo,
+  type AppNotification,
+  type BookPurchaseItem,
+  type FreeBook,
+  type PaidBookPublic,
+  type SignalDirection,
+  type SignalOrderType,
+  type SignalResult,
+  type UserProfile,
+  type VipGrant,
+  type VipRequestItem,
+  type VipSignalPrivate,
+  type VipSignalPublic,
+} from '../types/academy';
+import { GoogleSignInButton, ResilientImage } from './ResilientImage';
+
+type AdminTab =
+  | 'overview'
+  | 'signals'
+  | 'vip-requests'
+  | 'book-purchases'
+  | 'videos'
+  | 'free-pdfs'
+  | 'paid-pdfs'
+  | 'users'
+  | 'notifications'
+  | 'statistics'
+  | 'settings';
+
+function tsMs(v: unknown): number {
+  if (v && typeof v === 'object' && 'toMillis' in v && typeof (v as Timestamp).toMillis === 'function') {
+    return (v as Timestamp).toMillis();
+  }
+  return Date.now();
+}
+
+export const AdminDashboard: React.FC = () => {
+  const { user, authReady, isAdmin, settings, visitorStats, logout } = useAcademy();
+  const [activeTab, setActiveTab] = useState<AdminTab>('overview');
+  const [toast, setToast] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+  const [confirmAction, setConfirmAction] = useState<{
+    title: string;
+    description: string;
+    onConfirm: () => Promise<void>;
+  } | null>(null);
+
+  // Admin Live Collections
+  const [pubSignals, setPubSignals] = useState<VipSignalPublic[]>([]);
+  const [privSignals, setPrivSignals] = useState<Record<string, VipSignalPrivate>>({});
+  const [vipRequests, setVipRequests] = useState<VipRequestItem[]>([]);
+  const [bookPurchases, setBookPurchases] = useState<BookPurchaseItem[]>([]);
+  const [allVideos, setAllVideos] = useState<AcademyVideo[]>([]);
+  const [allFreeBooks, setAllFreeBooks] = useState<FreeBook[]>([]);
+  const [allPaidBooks, setAllPaidBooks] = useState<PaidBookPublic[]>([]);
+  const [allUsers, setAllUsers] = useState<UserProfile[]>([]);
+  const [allGrants, setAllGrants] = useState<Record<string, VipGrant>>({});
+  const [allNotifs, setAllNotifs] = useState<AppNotification[]>([]);
+
+  // Signal Form State
+  const [editingSignalId, setEditingSignalId] = useState<string | null>(null);
+  const [sigDate, setSigDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [sigDirection, setSigDirection] = useState<SignalDirection>('BUY');
+  const [sigOrderType, setSigOrderType] = useState<SignalOrderType>('LIMIT');
+  const [sigEntry, setSigEntry] = useState('4140');
+  const [sigTp, setSigTp] = useState('4150');
+  const [sigExtraTp, setSigExtraTp] = useState('4160');
+  const [sigSl, setSigSl] = useState('4128');
+  const [sigResult, setSigResult] = useState<SignalResult>('ACTIVE');
+  const [sigNote, setSigNote] = useState('Wait for M15 candlestick confirmation before entry.');
+
+  // Video Form State
+  const [vidTitle, setVidTitle] = useState('');
+  const [vidUrl, setVidUrl] = useState('');
+  const [vidThumb, setVidThumb] = useState('');
+  const [vidDesc, setVidDesc] = useState('');
+
+  // Free Book Form State
+  const [fbName, setFbName] = useState('');
+  const [fbDesc, setFbDesc] = useState('');
+  const [fbCover, setFbCover] = useState('');
+  const [fbPdf, setFbPdf] = useState('');
+
+  // Paid Book Form State
+  const [pbName, setPbName] = useState('');
+  const [pbDesc, setPbDesc] = useState('');
+  const [pbPrice, setPbPrice] = useState('29');
+  const [pbCover, setPbCover] = useState('');
+  const [pbPdf, setPbPdf] = useState('');
+
+  // Notification Form State
+  const [notifTitle, setNotifTitle] = useState('');
+  const [notifMsg, setNotifMsg] = useState('');
+  const [notifBtnText, setNotifBtnText] = useState('');
+  const [notifBtnUrl, setNotifBtnUrl] = useState('');
+
+  // Settings Draft State
+  const [draftSettings, setDraftSettings] = useState<AcademySettings>(settings);
+  const [uploadingField, setUploadingField] = useState<string | null>(null);
+  const [syncingSheets, setSyncingSheets] = useState(false);
+
+  useEffect(() => {
+    setDraftSettings(settings);
+  }, [settings]);
+
+  const showToast = (type: 'ok' | 'err', text: string) => {
+    setToast({ type, text });
+    window.setTimeout(() => setToast(null), 4200);
+  };
+
+  // Attach Admin Firestore Listeners ONLY when verified Admin
+  useEffect(() => {
+    if (!user || !isAdmin) return;
+
+    const u1 = onSnapshot(
+      collection(db, 'vipSignalsPublic'),
+      (snap) => {
+        const list: VipSignalPublic[] = [];
+        snap.forEach((d) => {
+          const r = d.data();
+          list.push({
+            id: d.id,
+            date: r.date,
+            currency: 'XAUUSD',
+            direction: r.direction,
+            orderType: r.orderType,
+            result: r.result,
+            pips: r.pips,
+            createdAtMs: tsMs(r.createdAt),
+          });
+        });
+        setPubSignals(list.sort((a, b) => b.createdAtMs - a.createdAtMs));
+      },
+      (e) => handleFirestoreError(e, OperationType.LIST, 'vipSignalsPublic')
+    );
+
+    const u2 = onSnapshot(
+      collection(db, 'vipSignalsPrivate'),
+      (snap) => {
+        const map: Record<string, VipSignalPrivate> = {};
+        snap.forEach((d) => {
+          const r = d.data();
+          map[d.id] = {
+            id: d.id,
+            currency: 'XAUUSD',
+            entry: r.entry,
+            tp: r.tp,
+            extraTp: r.extraTp,
+            sl: r.sl,
+            note: r.note,
+          };
+        });
+        setPrivSignals(map);
+      },
+      (e) => handleFirestoreError(e, OperationType.LIST, 'vipSignalsPrivate')
+    );
+
+    const u3 = onSnapshot(
+      collection(db, 'vipRequests'),
+      (snap) => {
+        const list: VipRequestItem[] = [];
+        snap.forEach((d) => {
+          const r = d.data();
+          list.push({
+            id: d.id,
+            userId: r.userId,
+            name: r.name,
+            email: r.email,
+            telegram: r.telegram,
+            method: r.method,
+            exnessId: r.exnessId,
+            transactionId: r.transactionId,
+            customDetails: r.customDetails,
+            status: r.status,
+            createdAtMs: tsMs(r.createdAt),
+          });
+        });
+        setVipRequests(list.sort((a, b) => b.createdAtMs - a.createdAtMs));
+      },
+      (e) => handleFirestoreError(e, OperationType.LIST, 'vipRequests')
+    );
+
+    const u4 = onSnapshot(
+      collection(db, 'bookPurchases'),
+      (snap) => {
+        const list: BookPurchaseItem[] = [];
+        snap.forEach((d) => {
+          const r = d.data();
+          list.push({
+            id: d.id,
+            userId: r.userId,
+            userEmail: r.userEmail,
+            bookId: r.bookId,
+            bookName: r.bookName,
+            price: r.price,
+            name: r.name,
+            telegram: r.telegram,
+            transactionId: r.transactionId,
+            status: r.status,
+            createdAtMs: tsMs(r.createdAt),
+          });
+        });
+        setBookPurchases(list.sort((a, b) => b.createdAtMs - a.createdAtMs));
+      },
+      (e) => handleFirestoreError(e, OperationType.LIST, 'bookPurchases')
+    );
+
+    const u5 = onSnapshot(
+      collection(db, 'videos'),
+      (snap) => {
+        const list: AcademyVideo[] = [];
+        snap.forEach((d) => {
+          const r = d.data();
+          list.push({
+            id: d.id,
+            title: r.title,
+            youtubeUrl: r.youtubeUrl,
+            thumbnail: r.thumbnail,
+            description: r.description,
+            date: r.date,
+            status: r.status,
+            createdAtMs: tsMs(r.createdAt),
+          });
+        });
+        setAllVideos(list.sort((a, b) => b.createdAtMs - a.createdAtMs));
+      },
+      (e) => handleFirestoreError(e, OperationType.LIST, 'videos')
+    );
+
+    const u6 = onSnapshot(
+      collection(db, 'freeBooks'),
+      (snap) => {
+        const list: FreeBook[] = [];
+        snap.forEach((d) => {
+          const r = d.data();
+          list.push({
+            id: d.id,
+            name: r.name,
+            description: r.description,
+            coverUrl: r.coverUrl,
+            pdfUrl: r.pdfUrl,
+            views: r.views ?? 0,
+            downloads: r.downloads ?? 0,
+            status: r.status,
+            createdAtMs: tsMs(r.createdAt),
+          });
+        });
+        setAllFreeBooks(list.sort((a, b) => b.createdAtMs - a.createdAtMs));
+      },
+      (e) => handleFirestoreError(e, OperationType.LIST, 'freeBooks')
+    );
+
+    const u7 = onSnapshot(
+      collection(db, 'paidBooksPublic'),
+      (snap) => {
+        const list: PaidBookPublic[] = [];
+        snap.forEach((d) => {
+          const r = d.data();
+          list.push({
+            id: d.id,
+            name: r.name,
+            description: r.description,
+            coverUrl: r.coverUrl,
+            price: r.price ?? 0,
+            status: r.status,
+            createdAtMs: tsMs(r.createdAt),
+          });
+        });
+        setAllPaidBooks(list.sort((a, b) => b.createdAtMs - a.createdAtMs));
+      },
+      (e) => handleFirestoreError(e, OperationType.LIST, 'paidBooksPublic')
+    );
+
+    const u8 = onSnapshot(
+      collection(db, 'users'),
+      (snap) => {
+        const list: UserProfile[] = [];
+        snap.forEach((d) => list.push(d.data() as UserProfile));
+        setAllUsers(list);
+      },
+      (e) => handleFirestoreError(e, OperationType.LIST, 'users')
+    );
+
+    const u9 = onSnapshot(
+      collection(db, 'vipGrants'),
+      (snap) => {
+        const map: Record<string, VipGrant> = {};
+        snap.forEach((d) => {
+          const r = d.data();
+          map[d.id] = {
+            userId: r.userId,
+            vipStatus: r.vipStatus,
+            vipType: r.vipType,
+            approvalStatus: r.approvalStatus,
+            vipExpiryMs: tsMs(r.vipExpiry),
+          };
+        });
+        setAllGrants(map);
+      },
+      (e) => handleFirestoreError(e, OperationType.LIST, 'vipGrants')
+    );
+
+    const u10 = onSnapshot(
+      collection(db, 'notifications'),
+      (snap) => {
+        const list: AppNotification[] = [];
+        snap.forEach((d) => {
+          const r = d.data();
+          list.push({
+            id: d.id,
+            targetUid: r.targetUid,
+            title: r.title,
+            message: r.message,
+            icon: r.icon,
+            buttonText: r.buttonText,
+            buttonUrl: r.buttonUrl,
+            active: r.active,
+            createdAtMs: tsMs(r.createdAt),
+          });
+        });
+        setAllNotifs(list.sort((a, b) => b.createdAtMs - a.createdAtMs));
+      },
+      (e) => handleFirestoreError(e, OperationType.LIST, 'notifications')
+    );
+
+    return () => {
+      u1();
+      u2();
+      u3();
+      u4();
+      u5();
+      u6();
+      u7();
+      u8();
+      u9();
+      u10();
+    };
+  }, [user, isAdmin]);
+
+  // --- Admin Helper: Upload File to Firebase Storage ---
+  const handleStorageUpload = async (
+    file: File,
+    folder: string,
+    onUrl: (url: string) => void
+  ) => {
+    setUploadingField(folder);
+    try {
+      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+      const storageRef = ref(storage, `academy/${folder}/${Date.now()}_${safeName}`);
+      await uploadBytes(storageRef, file);
+      const downloadUrl = await getDownloadURL(storageRef);
+      onUrl(downloadUrl);
+      showToast('ok', `Uploaded ${file.name} to Firebase Storage.`);
+    } catch (err) {
+      showToast(
+        'err',
+        err instanceof Error
+          ? `Storage upload error: ${err.message}`
+          : 'Could not upload file to Firebase Storage.'
+      );
+    } finally {
+      setUploadingField(null);
+    }
+  };
+
+  // --- Seed Starter Catalog Into Live Firestore ---
+  const handleInitializeStarterData = async () => {
+    try {
+      const batch = writeBatch(db);
+      const settingsSnap = await getDoc(doc(db, 'settings', 'config'));
+      if (!settingsSnap.exists()) {
+        batch.set(doc(db, 'settings', 'config'), {
+          ...settings,
+          updatedAt: serverTimestamp(),
+        });
+      }
+
+      for (const sig of STARTER_SIGNALS_PUBLIC.slice(0, 3)) {
+        batch.set(doc(db, 'vipSignalsPublic', sig.id), {
+          id: sig.id,
+          date: sig.date,
+          currency: 'XAUUSD',
+          direction: sig.direction,
+          orderType: sig.orderType,
+          result: sig.result,
+          pips: sig.pips,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+        batch.set(doc(db, 'vipSignalsPrivate', sig.id), {
+          id: sig.id,
+          currency: 'XAUUSD',
+          entry: 4140,
+          tp: 4150,
+          extraTp: 4160,
+          sl: 4128,
+          note: 'Wait for M15 confirmation candle at fresh H4 MSNR level.',
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      }
+
+      for (const v of STARTER_VIDEOS) {
+        batch.set(doc(db, 'videos', v.id), {
+          id: v.id,
+          title: v.title,
+          youtubeUrl: v.youtubeUrl,
+          thumbnail: v.thumbnail,
+          description: v.description,
+          date: v.date,
+          status: 'ACTIVE',
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      }
+
+      for (const fb of STARTER_FREE_BOOKS) {
+        batch.set(doc(db, 'freeBooks', fb.id), {
+          id: fb.id,
+          name: fb.name,
+          description: fb.description,
+          coverUrl: fb.coverUrl,
+          pdfUrl: fb.pdfUrl,
+          views: fb.views,
+          downloads: fb.downloads,
+          status: 'ACTIVE',
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      }
+
+      for (const pb of STARTER_PAID_BOOKS) {
+        batch.set(doc(db, 'paidBooksPublic', pb.id), {
+          id: pb.id,
+          name: pb.name,
+          description: pb.description,
+          coverUrl: pb.coverUrl,
+          price: pb.price,
+          status: 'ACTIVE',
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+        batch.set(doc(db, 'paidBooksProtected', pb.id), {
+          id: pb.id,
+          pdfUrl:
+            pb.id === 'paid_msnr_playbook'
+              ? '/api/sample-pdf/msnr-masterbook-pro'
+              : '/api/sample-pdf/xauusd-liquidity-atlas',
+          updatedAt: serverTimestamp(),
+        });
+      }
+
+      await batch.commit();
+      showToast('ok', 'Starter signals, videos, and PDFs published to Firestore.');
+    } catch (err) {
+      showToast('err', err instanceof Error ? err.message : 'Initialization failed.');
+    }
+  };
+
+  // --- Signals CRUD ---
+  const handleSaveSignal = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const entryNum = Number(sigEntry);
+    const tpNum = Number(sigTp);
+    const extraTpNum = Number(sigExtraTp || sigTp);
+    const slNum = Number(sigSl);
+
+    if (!Number.isFinite(entryNum) || !Number.isFinite(tpNum) || !Number.isFinite(slNum)) {
+      showToast('err', 'Entry, TP, and SL must be valid numbers.');
+      return;
+    }
+
+    const pips = calculateSignalPips({
+      direction: sigDirection,
+      entry: entryNum,
+      tp: tpNum,
+      sl: slNum,
+      result: sigResult,
+      pipMultiplier: settings.pipMultiplier,
+    });
+
+    try {
+      const id = editingSignalId || sanitizeId(`sig_xau_${Date.now()}`);
+      const batch = writeBatch(db);
+
+      if (editingSignalId) {
+        batch.update(doc(db, 'vipSignalsPublic', id), {
+          date: clampStr(sigDate, 40),
+          direction: sigDirection,
+          orderType: sigOrderType,
+          result: sigResult,
+          pips,
+          updatedAt: serverTimestamp(),
+        });
+        batch.update(doc(db, 'vipSignalsPrivate', id), {
+          entry: entryNum,
+          tp: tpNum,
+          extraTp: extraTpNum,
+          sl: slNum,
+          note: clampStr(sigNote, 1000),
+          updatedAt: serverTimestamp(),
+        });
+      } else {
+        batch.set(doc(db, 'vipSignalsPublic', id), {
+          id,
+          date: clampStr(sigDate, 40),
+          currency: 'XAUUSD',
+          direction: sigDirection,
+          orderType: sigOrderType,
+          result: sigResult,
+          pips,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+        batch.set(doc(db, 'vipSignalsPrivate', id), {
+          id,
+          currency: 'XAUUSD',
+          entry: entryNum,
+          tp: tpNum,
+          extraTp: extraTpNum,
+          sl: slNum,
+          note: clampStr(sigNote, 1000),
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      }
+
+      await batch.commit();
+      setEditingSignalId(null);
+      showToast('ok', editingSignalId ? 'Signal updated.' : 'New XAUUSD VIP signal published.');
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, 'vipSignalsPublic');
+    }
+  };
+
+  const handleMarkSignalOutcome = async (sig: VipSignalPublic, outcome: SignalResult) => {
+    const priv = privSignals[sig.id];
+    const pips = priv
+      ? calculateSignalPips({
+          direction: sig.direction,
+          entry: priv.entry,
+          tp: priv.tp,
+          sl: priv.sl,
+          result: outcome,
+          pipMultiplier: settings.pipMultiplier,
+        })
+      : sig.pips;
+
+    try {
+      await updateDoc(doc(db, 'vipSignalsPublic', sig.id), {
+        result: outcome,
+        pips,
+        updatedAt: serverTimestamp(),
+      });
+      showToast('ok', `Marked signal ${sig.id} as ${outcome} (${pips >= 0 ? '+' : ''}${pips} pips).`);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `vipSignalsPublic/${sig.id}`);
+    }
+  };
+
+  // --- VIP Request Approval / Rejection ---
+  const handleVipDecision = async (req: VipRequestItem, decision: 'APPROVED' | 'REJECTED') => {
+    try {
+      const batch = writeBatch(db);
+      batch.update(doc(db, 'vipRequests', req.id), {
+        status: decision,
+        updatedAt: serverTimestamp(),
+      });
+
+      if (decision === 'APPROVED') {
+        const isLifetime = req.method === 'EXNESS';
+        const vipType = isLifetime ? 'LIFETIME' : req.method === 'BINANCE' ? 'MONTHLY' : 'CUSTOM';
+        const expiryDate = isLifetime
+          ? new Date('2099-12-31T23:59:59Z')
+          : new Date(Date.now() + 30 * 86_400_000);
+
+        const grantRef = doc(db, 'vipGrants', req.userId);
+        const existingGrant = await getDoc(grantRef);
+        const grantPayload = {
+          userId: req.userId,
+          vipStatus: 'ACTIVE',
+          vipType,
+          approvalStatus: 'APPROVED',
+          vipExpiry: Timestamp.fromDate(expiryDate),
+          updatedAt: serverTimestamp(),
+        };
+        if (existingGrant.exists()) {
+          batch.update(grantRef, {
+            vipStatus: 'ACTIVE',
+            vipType,
+            approvalStatus: 'APPROVED',
+            vipExpiry: Timestamp.fromDate(expiryDate),
+            updatedAt: serverTimestamp(),
+          });
+        } else {
+          batch.set(grantRef, grantPayload);
+        }
+      }
+
+      // Send targeted Apple-style notification to user
+      const notifId = sanitizeId(`notif_vip_${Date.now()}`);
+      batch.set(doc(db, 'notifications', notifId), {
+        id: notifId,
+        targetUid: req.userId,
+        title: decision === 'APPROVED' ? 'VIP Access Approved' : 'VIP Request Update',
+        message:
+          decision === 'APPROVED'
+            ? req.method === 'EXNESS'
+              ? 'Your Exness Lifetime VIP access is now active. Open VIP Signals to view full XAUUSD setups.'
+              : 'Your 30-day Monthly VIP access is now active. Open VIP Signals to view full XAUUSD setups.'
+            : 'Your VIP verification request could not be confirmed. Contact our Telegram desk for assistance.',
+        icon: 'crown',
+        buttonText: decision === 'APPROVED' ? 'Open VIP Signals' : 'Contact Support',
+        buttonUrl: decision === 'APPROVED' ? './index.html#signals' : './contact.html',
+        active: true,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+
+      await batch.commit();
+      showToast('ok', `VIP request ${decision.toLowerCase()} and member notified.`);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `vipRequests/${req.id}`);
+    }
+  };
+
+  // --- Book Purchase Approval / Rejection / Revocation ---
+  const handleBookPurchaseDecision = async (
+    pur: BookPurchaseItem,
+    decision: 'APPROVED' | 'REJECTED'
+  ) => {
+    try {
+      const batch = writeBatch(db);
+      batch.update(doc(db, 'bookPurchases', pur.id), {
+        status: decision,
+        updatedAt: serverTimestamp(),
+      });
+
+      const accessId = `${pur.userId}_${pur.bookId}`;
+      const accessRef = doc(db, 'bookAccess', accessId);
+      const accessSnap = await getDoc(accessRef);
+
+      if (decision === 'APPROVED') {
+        if (accessSnap.exists()) {
+          batch.update(accessRef, { status: 'APPROVED', updatedAt: serverTimestamp() });
+        } else {
+          batch.set(accessRef, {
+            id: accessId,
+            userId: pur.userId,
+            bookId: pur.bookId,
+            status: 'APPROVED',
+            updatedAt: serverTimestamp(),
+          });
+        }
+      } else if (accessSnap.exists()) {
+        batch.update(accessRef, { status: 'REVOKED', updatedAt: serverTimestamp() });
+      }
+
+      const notifId = sanitizeId(`notif_bk_${Date.now()}`);
+      batch.set(doc(db, 'notifications', notifId), {
+        id: notifId,
+        targetUid: pur.userId,
+        title: decision === 'APPROVED' ? 'Digital Book Unlocked' : 'Book Payment Update',
+        message:
+          decision === 'APPROVED'
+            ? `"${pur.bookName}" is now unlocked for download in Paid PDFs.`
+            : `Your payment submission for "${pur.bookName}" could not be verified.`,
+        icon: 'book',
+        buttonText: 'Open Bookstore',
+        buttonUrl: './index.html#paid-pdfs',
+        active: true,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+
+      await batch.commit();
+      showToast('ok', `Book purchase marked ${decision.toLowerCase()}.`);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `bookPurchases/${pur.id}`);
+    }
+  };
+
+  // --- User Direct VIP Management ---
+  const handleManualUserVip = async (
+    targetUid: string,
+    mode: 'LIFETIME' | 'EXTEND_30D' | 'REVOKE'
+  ) => {
+    try {
+      const grantRef = doc(db, 'vipGrants', targetUid);
+      const snap = await getDoc(grantRef);
+
+      const expiry =
+        mode === 'LIFETIME'
+          ? new Date('2099-12-31T23:59:59Z')
+          : mode === 'EXTEND_30D'
+          ? new Date(Math.max(Date.now(), allGrants[targetUid]?.vipExpiryMs || 0) + 30 * 86_400_000)
+          : new Date(Date.now() - 60_000);
+
+      const nextData = {
+        userId: targetUid,
+        vipStatus: mode === 'REVOKE' ? ('REVOKED' as const) : ('ACTIVE' as const),
+        vipType:
+          mode === 'LIFETIME'
+            ? ('LIFETIME' as const)
+            : mode === 'EXTEND_30D'
+            ? ('MONTHLY' as const)
+            : ('NONE' as const),
+        approvalStatus: mode === 'REVOKE' ? ('REJECTED' as const) : ('APPROVED' as const),
+        vipExpiry: Timestamp.fromDate(expiry),
+        updatedAt: serverTimestamp(),
+      };
+
+      if (snap.exists()) {
+        await updateDoc(grantRef, {
+          vipStatus: nextData.vipStatus,
+          vipType: nextData.vipType,
+          approvalStatus: nextData.approvalStatus,
+          vipExpiry: nextData.vipExpiry,
+          updatedAt: serverTimestamp(),
+        });
+      } else {
+        await setDoc(grantRef, nextData);
+      }
+      showToast('ok', `Updated VIP grant (${mode}) for user.`);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `vipGrants/${targetUid}`);
+    }
+  };
+
+  // --- Google Sheets Synchronization ---
+  const handleSyncSheets = async (kind: 'videos' | 'free-pdfs' | 'paid-pdfs') => {
+    setSyncingSheets(true);
+    try {
+      const publishedCsvUrl =
+        kind === 'videos'
+          ? draftSettings.sheetsVideosUrl
+          : kind === 'free-pdfs'
+          ? draftSettings.sheetsFreePdfsUrl
+          : draftSettings.sheetsPaidPdfsUrl;
+      const tabName =
+        kind === 'videos' ? 'Videos' : kind === 'free-pdfs' ? 'FreePDFs' : 'PaidPDFs';
+
+      if (draftSettings.sheetsSpreadsheetId && !publishedCsvUrl) {
+        // Ensure Google Sheets read-only token is active
+        await signInWithGoogle({ includeSheetsScope: true });
+      }
+
+      const rows = await fetchGoogleSheetRows({
+        publishedCsvUrl,
+        spreadsheetId: draftSettings.sheetsSpreadsheetId,
+        tabName,
+      });
+
+      if (rows.length === 0) {
+        showToast('err', 'Sheet returned 0 rows. Verify column headers and active rows.');
+        return;
+      }
+
+      const batch = writeBatch(db);
+      let count = 0;
+
+      if (kind === 'videos') {
+        for (const r of rows) {
+          const id = sanitizeId(r.id || `vid_${count}_${Date.now()}`);
+          const ytUrl = clampStr(r.youtube_url || r.youtubeurl, 500);
+          if (!ytUrl) continue;
+          const status = (r.status || 'ACTIVE').toUpperCase() === 'INACTIVE' ? 'INACTIVE' : 'ACTIVE';
+          batch.set(doc(db, 'videos', id), {
+            id,
+            title: clampStr(r.title, 200, 'MSNR Lesson'),
+            youtubeUrl: ytUrl,
+            thumbnail: clampStr(
+              r.thumbnail || extractYoutubeThumbnail(ytUrl, ASSETS.videoThumb),
+              500
+            ),
+            description: clampStr(r.description, 1000),
+            date: clampStr(r.date || new Date().toISOString().slice(0, 10), 40),
+            status,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          });
+          count++;
+        }
+      } else if (kind === 'free-pdfs') {
+        for (const r of rows) {
+          const id = sanitizeId(r.id || `free_${count}_${Date.now()}`);
+          const pdfUrl = clampStr(r.pdf_url || r.pdfurl, 500);
+          if (!pdfUrl) continue;
+          const status = (r.status || 'ACTIVE').toUpperCase() === 'INACTIVE' ? 'INACTIVE' : 'ACTIVE';
+          batch.set(doc(db, 'freeBooks', id), {
+            id,
+            name: clampStr(r.name, 200, 'MSNR Guide'),
+            description: clampStr(r.description, 1000),
+            coverUrl: clampStr(r.cover_url || r.coverurl || ASSETS.bookMsnr, 500),
+            pdfUrl,
+            views: 0,
+            downloads: 0,
+            status,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          });
+          count++;
+        }
+      } else {
+        for (const r of rows) {
+          const id = sanitizeId(r.id || `paid_${count}_${Date.now()}`);
+          const pdfUrl = clampStr(r.pdf_url || r.pdfurl, 500);
+          if (!pdfUrl) continue;
+          const status = (r.status || 'ACTIVE').toUpperCase() === 'INACTIVE' ? 'INACTIVE' : 'ACTIVE';
+          batch.set(doc(db, 'paidBooksPublic', id), {
+            id,
+            name: clampStr(r.name, 200, 'Premium MSNR Book'),
+            description: clampStr(r.description, 1000),
+            coverUrl: clampStr(r.cover_url || r.coverurl || ASSETS.bookXauusd, 500),
+            price: Math.max(0, Number(r.price) || 29),
+            status,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          });
+          batch.set(doc(db, 'paidBooksProtected', id), {
+            id,
+            pdfUrl,
+            updatedAt: serverTimestamp(),
+          });
+          count++;
+        }
+      }
+
+      await batch.commit();
+      showToast('ok', `Synchronized ${count} ${kind} items from Google Sheets.`);
+    } catch (err) {
+      showToast('err', err instanceof Error ? err.message : 'Google Sheets sync failed.');
+    } finally {
+      setSyncingSheets(false);
+    }
+  };
+
+  // --- Save Global Settings ---
+  const handleSaveSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const refDoc = doc(db, 'settings', 'config');
+      const snap = await getDoc(refDoc);
+      const payload = {
+        siteName: clampStr(draftSettings.siteName, 120, 'Trade With Amith'),
+        logoUrl: clampStr(draftSettings.logoUrl, 500, ASSETS.brandEmblem),
+        heroSubtitle: clampStr(draftSettings.heroSubtitle, 300),
+        msnrDescription: clampStr(draftSettings.msnrDescription, 1500),
+        winRate: clampStr(draftSettings.winRate, 30, '89.4%'),
+        subscriberCountFallback: clampStr(draftSettings.subscriberCountFallback, 40, '336'),
+        youtubeChannelId: clampStr(normalizeYoutubeChannelId(draftSettings.youtubeChannelId), 80),
+        youtubeChannelUrl: clampStr(draftSettings.youtubeChannelUrl, 300),
+        youtubeGateEnabled: Boolean(draftSettings.youtubeGateEnabled),
+        pipMultiplier: Math.max(0.1, Number(draftSettings.pipMultiplier) || 10),
+        binancePayId: clampStr(draftSettings.binancePayId, 80, '973369286'),
+        binanceQrUrl: clampStr(draftSettings.binanceQrUrl, 500, ASSETS.binanceQr),
+        binanceLogoUrl: clampStr(draftSettings.binanceLogoUrl, 500),
+        vipMonthlyPrice: Math.max(0, Number(draftSettings.vipMonthlyPrice) || 15),
+        exnessReferralUrl: clampStr(draftSettings.exnessReferralUrl, 500),
+        exnessMinDeposit: Math.max(0, Number(draftSettings.exnessMinDeposit) || 30),
+        thirdMethodEnabled: Boolean(draftSettings.thirdMethodEnabled),
+        thirdMethodTitle: clampStr(draftSettings.thirdMethodTitle, 120),
+        thirdMethodDescription: clampStr(draftSettings.thirdMethodDescription, 600),
+        thirdMethodPrice: clampStr(draftSettings.thirdMethodPrice, 60),
+        thirdMethodPayment: clampStr(draftSettings.thirdMethodPayment, 120),
+        thirdMethodInstructions: clampStr(draftSettings.thirdMethodInstructions, 800),
+        thirdMethodFields: clampStr(draftSettings.thirdMethodFields, 300),
+        telegramUrl: clampStr(normalizeTelegramUrl(draftSettings.telegramUrl), 300),
+        contactEmail: clampStr(draftSettings.contactEmail, 200),
+        instagramUrl: clampStr(draftSettings.instagramUrl, 300),
+        sheetsVideosUrl: clampStr(draftSettings.sheetsVideosUrl, 500),
+        sheetsFreePdfsUrl: clampStr(draftSettings.sheetsFreePdfsUrl, 500),
+        sheetsPaidPdfsUrl: clampStr(draftSettings.sheetsPaidPdfsUrl, 500),
+        sheetsSpreadsheetId: clampStr(draftSettings.sheetsSpreadsheetId, 150),
+        onboardingNotifEnabled: Boolean(draftSettings.onboardingNotifEnabled),
+        onboardingNotifTitle: clampStr(draftSettings.onboardingNotifTitle, 120),
+        onboardingNotifMessage: clampStr(draftSettings.onboardingNotifMessage, 300),
+        updatedAt: serverTimestamp(),
+      };
+
+      if (snap.exists()) {
+        await updateDoc(refDoc, payload);
+      } else {
+        await setDoc(refDoc, payload);
+      }
+      showToast('ok', 'Academy settings saved and synced live.');
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, 'settings/config');
+    }
+  };
+
+  // --- Auth Loading / Unauthorized Screens ---
+  if (!authReady) {
+    return (
+      <div className="min-h-screen bg-[#070709] flex items-center justify-center p-6 text-sm text-[#A1A1AA]">
+        Initializing Admin Console...
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-[#070709] flex items-center justify-center p-4">
+        <div className="w-full max-w-md apple-window rounded-3xl p-8 text-center space-y-6">
+          <ResilientImage
+            src={settings.logoUrl}
+            alt={settings.siteName}
+            className="w-16 h-16 rounded-2xl mx-auto object-cover border border-white/15"
+          />
+          <div className="space-y-1.5">
+            <p className="text-xs font-semibold text-[#D4AF37]">PROTECTED CONSOLE</p>
+            <h1 className="text-2xl font-semibold text-[#F5F5F7]">MSNR Admin Dashboard</h1>
+            <p className="text-xs sm:text-sm text-[#A1A1AA]">
+              Sign in with your authorized administrator Google account to manage VIP signals,
+              approvals, books, and academy settings.
+            </p>
+          </div>
+          <div className="flex justify-center">
+            <GoogleSignInButton
+              onClick={() => signInWithGoogle()}
+              label="Sign in as Administrator"
+            />
+          </div>
+          <div>
+            <a href="./index.html" className="text-xs text-[#8E8E93] hover:text-[#F5F5F7]">
+              Return to Public Website
+            </a>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isAdmin) {
+    return (
+      <div className="min-h-screen bg-[#070709] flex items-center justify-center p-4">
+        <div className="w-full max-w-md apple-window rounded-3xl p-8 text-center space-y-5">
+          <ShieldAlert className="w-10 h-10 text-[#FF453A] mx-auto" />
+          <h1 className="text-xl font-semibold text-[#F5F5F7]">Administrator Access Required</h1>
+          <p className="text-xs sm:text-sm text-[#A1A1AA]">
+            Signed in as <strong className="text-[#F5F5F7]">{user.email}</strong>. This account is
+            not authorized to access the MSNR Academy Admin Console.
+          </p>
+          <div className="flex items-center justify-center gap-3">
+            <button
+              type="button"
+              onClick={logout}
+              className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-xs font-semibold text-[#F5F5F7]"
+            >
+              Switch Account
+            </button>
+            <a
+              href="./index.html"
+              className="px-4 py-2 rounded-xl bg-[#D4AF37] text-[#09090B] text-xs font-semibold"
+            >
+              Open Academy
+            </a>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const navItems: Array<{ id: AdminTab; label: string; icon: React.FC<{ className?: string }>; badge?: number }> = [
+    { id: 'overview', label: 'Overview', icon: LayoutDashboard },
+    { id: 'signals', label: 'VIP Signals', icon: BarChart3 },
+    {
+      id: 'vip-requests',
+      label: 'VIP Requests',
+      icon: Crown,
+      badge: vipRequests.filter((r) => r.status === 'PENDING').length,
+    },
+    {
+      id: 'book-purchases',
+      label: 'Book Purchases',
+      icon: BookOpen,
+      badge: bookPurchases.filter((b) => b.status === 'PENDING').length,
+    },
+    { id: 'videos', label: 'Videos', icon: PlaySquare },
+    { id: 'free-pdfs', label: 'Free PDFs', icon: FileText },
+    { id: 'paid-pdfs', label: 'Paid PDFs', icon: BookOpen },
+    { id: 'users', label: 'Users', icon: Users },
+    { id: 'notifications', label: 'Notifications', icon: Bell },
+    { id: 'statistics', label: 'Statistics', icon: BarChart3 },
+    { id: 'settings', label: 'Settings', icon: Settings },
+  ];
+
+  return (
+    <div className="min-h-screen bg-[#070709] text-[#F5F5F7] flex flex-col lg:flex-row">
+      {/* macOS Sidebar */}
+      <aside className="w-full lg:w-64 apple-glass border-b lg:border-b-0 lg:border-r border-white/[0.08] p-4 flex flex-col justify-between shrink-0">
+        <div className="space-y-5">
+          <div className="flex items-center justify-between px-2">
+            <a href="./index.html" className="flex items-center gap-2.5">
+              <ResilientImage
+                src={settings.logoUrl}
+                alt={settings.siteName}
+                className="w-7 h-7 rounded-lg object-cover border border-white/15"
+              />
+              <span className="text-sm font-semibold tracking-tight">{settings.siteName}</span>
+            </a>
+          </div>
+
+          <nav className="flex lg:flex-col gap-1 overflow-x-auto pb-1 lg:pb-0">
+            {navItems.map((item) => {
+              const Icon = item.icon;
+              const active = activeTab === item.id;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => setActiveTab(item.id)}
+                  className={`px-3 py-2 rounded-xl text-xs font-medium flex items-center justify-between gap-2 whitespace-nowrap shrink-0 transition-colors ${
+                    active
+                      ? 'bg-[#D4AF37] text-[#09090B] font-semibold'
+                      : 'text-[#A1A1AA] hover:text-[#F5F5F7] hover:bg-white/[0.05]'
+                  }`}
+                >
+                  <span className="flex items-center gap-2.5">
+                    <Icon className="w-4 h-4" />
+                    <span>{item.label}</span>
+                  </span>
+                  {item.badge !== undefined && item.badge > 0 && (
+                    <span
+                      className={`font-mono tabular-nums text-[11px] font-semibold ${
+                        active ? 'text-[#09090B]' : 'text-[#E5C76B]'
+                      }`}
+                    >
+                      {item.badge}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </nav>
+        </div>
+
+        <div className="hidden lg:flex flex-col gap-2 pt-6 border-t border-white/[0.08] text-xs">
+          <a
+            href="./index.html"
+            className="px-3 py-2 rounded-xl text-[#A1A1AA] hover:text-[#F5F5F7] hover:bg-white/[0.05] inline-flex items-center gap-2"
+          >
+            <ArrowLeft className="w-3.5 h-3.5" />
+            <span>Back to Live Website</span>
+          </a>
+          <button
+            type="button"
+            onClick={logout}
+            className="px-3 py-2 rounded-xl text-[#A1A1AA] hover:text-[#FF453A] hover:bg-white/[0.05] inline-flex items-center gap-2 text-left"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+            <span>Sign Out ({user.email?.split('@')[0]})</span>
+          </button>
+        </div>
+      </aside>
+
+      {/* Main Workspace */}
+      <main className="flex-1 min-w-0 p-5 sm:p-8 lg:p-10 space-y-8 overflow-y-auto">
+        {toast && (
+          <div
+            className={`p-3.5 rounded-xl text-xs font-medium border ${
+              toast.type === 'ok'
+                ? 'bg-[#30D158]/15 border-[#30D158]/30 text-[#30D158]'
+                : 'bg-[#FF453A]/15 border-[#FF453A]/30 text-[#FF453A]'
+            }`}
+          >
+            {toast.text}
+          </div>
+        )}
+
+        {/* 1. OVERVIEW */}
+        {activeTab === 'overview' && (
+          <div className="space-y-8">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div>
+                <p className="text-xs font-medium text-[#D4AF37]">ADMINISTRATION</p>
+                <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight">
+                  Academy Command Overview
+                </h1>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleInitializeStarterData}
+                className="px-4 py-2.5 rounded-xl bg-[#D4AF37] text-[#09090B] text-xs font-semibold hover:bg-[#E5C76B] transition-colors whitespace-nowrap"
+              >
+                Initialize / Sync Starter Catalog to Firestore
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 font-mono tabular-nums">
+              <div className="apple-surface rounded-2xl p-5">
+                <p className="text-xs font-sans text-[#A1A1AA]">Pending VIP Requests</p>
+                <p className="mt-2 text-2xl font-semibold text-[#E5C76B]">
+                  {vipRequests.filter((r) => r.status === 'PENDING').length}
+                </p>
+              </div>
+              <div className="apple-surface rounded-2xl p-5">
+                <p className="text-xs font-sans text-[#A1A1AA]">Pending Book Orders</p>
+                <p className="mt-2 text-2xl font-semibold text-[#E5C76B]">
+                  {bookPurchases.filter((b) => b.status === 'PENDING').length}
+                </p>
+              </div>
+              <div className="apple-surface rounded-2xl p-5">
+                <p className="text-xs font-sans text-[#A1A1AA]">Published Signals</p>
+                <p className="mt-2 text-2xl font-semibold text-[#F5F5F7]">{pubSignals.length}</p>
+              </div>
+              <div className="apple-surface rounded-2xl p-5">
+                <p className="text-xs font-sans text-[#A1A1AA]">Registered Members</p>
+                <p className="mt-2 text-2xl font-semibold text-[#F5F5F7]">{allUsers.length}</p>
+              </div>
+            </div>
+
+            <div className="apple-surface rounded-2xl p-6 space-y-3">
+              <h2 className="text-base font-semibold text-[#F5F5F7]">
+                Quick Firebase Hosting Deployment Guide
+              </h2>
+              <ol className="text-xs sm:text-sm text-[#A1A1AA] space-y-2 list-decimal list-inside leading-relaxed">
+                <li>
+                  Install Node.js (v20+) on your computer and run{' '}
+                  <code className="font-mono text-[#E5C76B]">npm install -g firebase-tools</code>.
+                </li>
+                <li>
+                  Inside your project folder, run{' '}
+                  <code className="font-mono text-[#E5C76B]">npm install</code> followed by{' '}
+                  <code className="font-mono text-[#E5C76B]">npm run build</code> to compile all 6
+                  pages (<code className="font-mono">index.html</code>,{' '}
+                  <code className="font-mono">admin.html</code>,{' '}
+                  <code className="font-mono">about.html</code>,{' '}
+                  <code className="font-mono">contact.html</code>,{' '}
+                  <code className="font-mono">terms.html</code>,{' '}
+                  <code className="font-mono">privacy.html</code>) into <code className="font-mono">dist/</code>.
+                </li>
+                <li>
+                  Run <code className="font-mono text-[#E5C76B]">firebase login</code> and{' '}
+                  <code className="font-mono text-[#E5C76B]">firebase deploy</code> — both{' '}
+                  <code className="font-mono">firebase.json</code> and{' '}
+                  <code className="font-mono">firestore.rules</code> are pre-configured.
+                </li>
+              </ol>
+            </div>
+          </div>
+        )}
+
+        {/* 2. VIP SIGNALS */}
+        {activeTab === 'signals' && (
+          <div className="space-y-8">
+            <h1 className="text-2xl font-semibold">Manage XAUUSD VIP Signals</h1>
+
+            <form onSubmit={handleSaveSignal} className="apple-surface rounded-2xl p-6 space-y-4">
+              <div className="flex items-center justify-between">
+                <h2 className="text-sm font-semibold text-[#F5F5F7]">
+                  {editingSignalId ? `Editing Signal (${editingSignalId})` : 'Publish New XAUUSD Signal'}
+                </h2>
+                {editingSignalId && (
+                  <button
+                    type="button"
+                    onClick={() => setEditingSignalId(null)}
+                    className="text-xs text-[#A1A1AA] hover:text-[#F5F5F7]"
+                  >
+                    Cancel Edit
+                  </button>
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                <div>
+                  <label className="block text-xs text-[#A1A1AA] mb-1">Date</label>
+                  <input
+                    type="date"
+                    value={sigDate}
+                    onChange={(e) => setSigDate(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-[#A1A1AA] mb-1">Direction</label>
+                  <select
+                    value={sigDirection}
+                    onChange={(e) => setSigDirection(e.target.value as SignalDirection)}
+                    className="w-full px-3 py-2 rounded-xl bg-[#14151B] border border-white/10 text-sm"
+                  >
+                    <option value="BUY">BUY</option>
+                    <option value="SELL">SELL</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-[#A1A1AA] mb-1">Order Type</label>
+                  <select
+                    value={sigOrderType}
+                    onChange={(e) => setSigOrderType(e.target.value as SignalOrderType)}
+                    className="w-full px-3 py-2 rounded-xl bg-[#14151B] border border-white/10 text-sm"
+                  >
+                    <option value="LIMIT">LIMIT</option>
+                    <option value="MARKET">MARKET</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-[#A1A1AA] mb-1">Status / Result</label>
+                  <select
+                    value={sigResult}
+                    onChange={(e) => setSigResult(e.target.value as SignalResult)}
+                    className="w-full px-3 py-2 rounded-xl bg-[#14151B] border border-white/10 text-sm"
+                  >
+                    <option value="ACTIVE">ACTIVE</option>
+                    <option value="TP HIT">TP HIT</option>
+                    <option value="SL HIT">SL HIT</option>
+                    <option value="CLOSED">CLOSED</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 font-mono">
+                <div>
+                  <label className="block text-xs font-sans text-[#A1A1AA] mb-1">Entry Price</label>
+                  <input
+                    type="number"
+                    step="any"
+                    required
+                    value={sigEntry}
+                    onChange={(e) => setSigEntry(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-sans text-[#A1A1AA] mb-1">TP</label>
+                  <input
+                    type="number"
+                    step="any"
+                    required
+                    value={sigTp}
+                    onChange={(e) => setSigTp(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-sans text-[#A1A1AA] mb-1">Extra TP</label>
+                  <input
+                    type="number"
+                    step="any"
+                    required
+                    value={sigExtraTp}
+                    onChange={(e) => setSigExtraTp(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-sans text-[#A1A1AA] mb-1">SL</label>
+                  <input
+                    type="number"
+                    step="any"
+                    required
+                    value={sigSl}
+                    onChange={(e) => setSigSl(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs text-[#A1A1AA] mb-1">Execution Note</label>
+                <input
+                  type="text"
+                  maxLength={1000}
+                  value={sigNote}
+                  onChange={(e) => setSigNote(e.target.value)}
+                  className="w-full px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm"
+                />
+              </div>
+
+              <button
+                type="submit"
+                className="px-5 py-2.5 rounded-xl bg-[#D4AF37] text-[#09090B] text-xs font-semibold hover:bg-[#E5C76B] inline-flex items-center gap-2"
+              >
+                <Plus className="w-4 h-4" />
+                <span>{editingSignalId ? 'Save Signal Changes' : 'Publish VIP Signal'}</span>
+              </button>
+            </form>
+
+            <div className="space-y-3">
+              {pubSignals.map((s) => {
+                const priv = privSignals[s.id];
+                return (
+                  <div
+                    key={s.id}
+                    className="apple-surface rounded-2xl p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4"
+                  >
+                    <div className="space-y-1 font-mono tabular-nums text-xs">
+                      <div className="flex items-center gap-2 font-sans">
+                        <span className="font-semibold text-sm text-[#F5F5F7]">{s.currency}</span>
+                        <span
+                          className={`font-semibold ${
+                            s.direction === 'BUY' ? 'text-[#30D158]' : 'text-[#FF453A]'
+                          }`}
+                        >
+                          {s.direction} {s.orderType}
+                        </span>
+                        <span className="text-[#8E8E93]">· {s.date} · {s.result}</span>
+                      </div>
+                      <p className="text-[#D1D1D6]">
+                        Entry: {priv?.entry ?? '—'} · TP: {priv?.tp ?? '—'} · Extra TP:{' '}
+                        {priv?.extraTp ?? '—'} · SL: {priv?.sl ?? '—'} · Pips: {s.pips}
+                      </p>
+                      {priv?.note && <p className="font-sans text-[#8E8E93]">{priv.note}</p>}
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleMarkSignalOutcome(s, 'TP HIT')}
+                        className="px-2.5 py-1.5 rounded-lg bg-[#30D158]/15 text-[#30D158] text-xs font-semibold"
+                      >
+                        TP HIT
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleMarkSignalOutcome(s, 'SL HIT')}
+                        className="px-2.5 py-1.5 rounded-lg bg-[#FF453A]/15 text-[#FF453A] text-xs font-semibold"
+                      >
+                        SL HIT
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleMarkSignalOutcome(s, 'CLOSED')}
+                        className="px-2.5 py-1.5 rounded-lg bg-white/10 text-[#F5F5F7] text-xs font-semibold"
+                      >
+                        CLOSED
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingSignalId(s.id);
+                          setSigDate(s.date);
+                          setSigDirection(s.direction);
+                          setSigOrderType(s.orderType);
+                          setSigResult(s.result);
+                          if (priv) {
+                            setSigEntry(String(priv.entry));
+                            setSigTp(String(priv.tp));
+                            setSigExtraTp(String(priv.extraTp));
+                            setSigSl(String(priv.sl));
+                            setSigNote(priv.note);
+                          }
+                        }}
+                        className="px-2.5 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-xs text-[#D1D1D6]"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setConfirmAction({
+                            title: 'Delete VIP Signal?',
+                            description: `Permanently delete ${s.currency} ${s.direction} signal (${s.date})?`,
+                            onConfirm: async () => {
+                              const b = writeBatch(db);
+                              b.delete(doc(db, 'vipSignalsPublic', s.id));
+                              b.delete(doc(db, 'vipSignalsPrivate', s.id));
+                              await b.commit();
+                              showToast('ok', 'Signal deleted.');
+                            },
+                          })
+                        }
+                        className="p-1.5 rounded-lg text-[#FF453A] hover:bg-[#FF453A]/15"
+                        aria-label="Delete signal"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* 3. VIP REQUESTS */}
+        {activeTab === 'vip-requests' && (
+          <div className="space-y-6">
+            <h1 className="text-2xl font-semibold">VIP Verification Requests</h1>
+            {vipRequests.length === 0 ? (
+              <div className="apple-surface rounded-2xl p-10 text-center text-sm text-[#A1A1AA]">
+                No VIP requests submitted yet.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {vipRequests.map((req) => (
+                  <div
+                    key={req.id}
+                    className="apple-surface rounded-2xl p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4"
+                  >
+                    <div className="space-y-1 text-xs">
+                      <p className="text-sm font-semibold text-[#F5F5F7]">
+                        {req.name} · <span className="text-[#D4AF37]">{req.method}</span> ·{' '}
+                        <span>{req.status}</span>
+                      </p>
+                      <p className="text-[#A1A1AA]">
+                        Email: {req.email} · Telegram: {req.telegram}
+                      </p>
+                      <p className="font-mono text-[#D1D1D6]">
+                        {req.method === 'EXNESS' && `Exness ID: ${req.exnessId}`}
+                        {req.method === 'BINANCE' && `Transaction ID: ${req.transactionId}`}
+                        {req.method === 'CUSTOM' && `Details: ${req.customDetails}`}
+                        {' · '}
+                        {new Date(req.createdAtMs).toLocaleDateString()}
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleVipDecision(req, 'APPROVED')}
+                        className="px-3.5 py-2 rounded-xl bg-[#30D158] text-[#09090B] text-xs font-semibold inline-flex items-center gap-1"
+                      >
+                        <Check className="w-3.5 h-3.5" />
+                        <span>APPROVE</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleVipDecision(req, 'REJECTED')}
+                        className="px-3.5 py-2 rounded-xl bg-[#FF453A]/20 text-[#FF453A] text-xs font-semibold"
+                      >
+                        REJECT
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* 4. BOOK PURCHASES */}
+        {activeTab === 'book-purchases' && (
+          <div className="space-y-6">
+            <h1 className="text-2xl font-semibold">Paid PDF Book Purchases</h1>
+            {bookPurchases.length === 0 ? (
+              <div className="apple-surface rounded-2xl p-10 text-center text-sm text-[#A1A1AA]">
+                No paid book purchase requests yet.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {bookPurchases.map((pur) => (
+                  <div
+                    key={pur.id}
+                    className="apple-surface rounded-2xl p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4"
+                  >
+                    <div className="space-y-1 text-xs">
+                      <p className="text-sm font-semibold text-[#F5F5F7]">
+                        {pur.bookName} · <span className="font-mono text-[#E5C76B]">${pur.price}</span>{' '}
+                        · {pur.status}
+                      </p>
+                      <p className="text-[#A1A1AA]">
+                        Buyer: {pur.name} ({pur.userEmail}) · Telegram: {pur.telegram}
+                      </p>
+                      <p className="font-mono text-[#D1D1D6]">
+                        TxID: {pur.transactionId} · {new Date(pur.createdAtMs).toLocaleDateString()}
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleBookPurchaseDecision(pur, 'APPROVED')}
+                        className="px-3.5 py-2 rounded-xl bg-[#30D158] text-[#09090B] text-xs font-semibold"
+                      >
+                        APPROVE BOOK
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleBookPurchaseDecision(pur, 'REJECTED')}
+                        className="px-3.5 py-2 rounded-xl bg-[#FF453A]/20 text-[#FF453A] text-xs font-semibold"
+                      >
+                        REJECT / REVOKE
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* 5. VIDEOS */}
+        {activeTab === 'videos' && (
+          <div className="space-y-6">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div>
+                <h1 className="text-2xl font-semibold">Videos Library</h1>
+                <p className="text-xs text-[#A1A1AA] font-mono">
+                  Google Sheet Columns: id, title, youtube_url, thumbnail, description, date, status
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={syncingSheets}
+                onClick={() => handleSyncSheets('videos')}
+                className="px-4 py-2 rounded-xl bg-[#D4AF37] text-[#09090B] text-xs font-semibold inline-flex items-center gap-2"
+              >
+                <FolderSync className="w-4 h-4" />
+                <span>{syncingSheets ? 'Syncing...' : 'Sync From Google Sheets'}</span>
+              </button>
+            </div>
+
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                const id = sanitizeId(`vid_${Date.now()}`);
+                await setDoc(doc(db, 'videos', id), {
+                  id,
+                  title: clampStr(vidTitle, 200),
+                  youtubeUrl: clampStr(vidUrl, 500),
+                  thumbnail: clampStr(
+                    vidThumb || extractYoutubeThumbnail(vidUrl, ASSETS.videoThumb),
+                    500
+                  ),
+                  description: clampStr(vidDesc, 1000),
+                  date: new Date().toISOString().slice(0, 10),
+                  status: 'ACTIVE',
+                  createdAt: serverTimestamp(),
+                  updatedAt: serverTimestamp(),
+                });
+                setVidTitle('');
+                setVidUrl('');
+                setVidThumb('');
+                setVidDesc('');
+                showToast('ok', 'Video added to library.');
+              }}
+              className="apple-surface rounded-2xl p-5 grid grid-cols-1 sm:grid-cols-2 gap-4"
+            >
+              <input
+                type="text"
+                required
+                placeholder="Video Title"
+                value={vidTitle}
+                onChange={(e) => setVidTitle(e.target.value)}
+                className="px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm"
+              />
+              <input
+                type="url"
+                required
+                placeholder="YouTube URL (https://www.youtube.com/watch?v=...)"
+                value={vidUrl}
+                onChange={(e) => setVidUrl(e.target.value)}
+                className="px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm"
+              />
+              <input
+                type="text"
+                placeholder="Optional Custom Thumbnail URL"
+                value={vidThumb}
+                onChange={(e) => setVidThumb(e.target.value)}
+                className="px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm"
+              />
+              <input
+                type="text"
+                required
+                placeholder="Short Description"
+                value={vidDesc}
+                onChange={(e) => setVidDesc(e.target.value)}
+                className="px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm"
+              />
+              <div className="sm:col-span-2">
+                <button
+                  type="submit"
+                  className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-xs font-semibold"
+                >
+                  Add Video Manually
+                </button>
+              </div>
+            </form>
+
+            <div className="space-y-3">
+              {allVideos.map((v) => (
+                <div
+                  key={v.id}
+                  className="apple-surface rounded-xl p-4 flex items-center justify-between gap-4"
+                >
+                  <div>
+                    <p className="text-sm font-semibold text-[#F5F5F7]">{v.title}</p>
+                    <p className="text-xs text-[#A1A1AA]">{v.youtubeUrl} · {v.status}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setConfirmAction({
+                        title: 'Delete Video?',
+                        description: `Remove "${v.title}" from the Videos library?`,
+                        onConfirm: async () => {
+                          await deleteDoc(doc(db, 'videos', v.id));
+                          showToast('ok', 'Video removed.');
+                        },
+                      })
+                    }
+                    className="p-2 rounded-lg text-[#FF453A] hover:bg-[#FF453A]/15"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* 6. FREE PDFS */}
+        {activeTab === 'free-pdfs' && (
+          <div className="space-y-6">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div>
+                <h1 className="text-2xl font-semibold">Free PDF Library</h1>
+                <p className="text-xs text-[#A1A1AA] font-mono">
+                  Google Sheet Columns: id, name, description, cover_url, pdf_url, status
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={syncingSheets}
+                onClick={() => handleSyncSheets('free-pdfs')}
+                className="px-4 py-2 rounded-xl bg-[#D4AF37] text-[#09090B] text-xs font-semibold inline-flex items-center gap-2"
+              >
+                <FolderSync className="w-4 h-4" />
+                <span>Sync From Google Sheets</span>
+              </button>
+            </div>
+
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                const id = sanitizeId(`free_${Date.now()}`);
+                await setDoc(doc(db, 'freeBooks', id), {
+                  id,
+                  name: clampStr(fbName, 200),
+                  description: clampStr(fbDesc, 1000),
+                  coverUrl: clampStr(fbCover || ASSETS.bookMsnr, 500),
+                  pdfUrl: clampStr(fbPdf, 500),
+                  views: 0,
+                  downloads: 0,
+                  status: 'ACTIVE',
+                  createdAt: serverTimestamp(),
+                  updatedAt: serverTimestamp(),
+                });
+                setFbName('');
+                setFbDesc('');
+                setFbCover('');
+                setFbPdf('');
+                showToast('ok', 'Free PDF published.');
+              }}
+              className="apple-surface rounded-2xl p-5 grid grid-cols-1 sm:grid-cols-2 gap-4"
+            >
+              <input
+                type="text"
+                required
+                placeholder="PDF Title"
+                value={fbName}
+                onChange={(e) => setFbName(e.target.value)}
+                className="px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm"
+              />
+              <input
+                type="text"
+                required
+                placeholder="Short Description"
+                value={fbDesc}
+                onChange={(e) => setFbDesc(e.target.value)}
+                className="px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm"
+              />
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  placeholder="Cover Image URL"
+                  value={fbCover}
+                  onChange={(e) => setFbCover(e.target.value)}
+                  className="flex-1 px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm"
+                />
+                <label className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-xs font-semibold cursor-pointer inline-flex items-center gap-1.5 shrink-0">
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>{uploadingField === 'covers' ? '...' : 'Cover'}</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) handleStorageUpload(f, 'covers', setFbCover);
+                    }}
+                  />
+                </label>
+              </div>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  required
+                  placeholder="PDF Storage URL"
+                  value={fbPdf}
+                  onChange={(e) => setFbPdf(e.target.value)}
+                  className="flex-1 px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm"
+                />
+                <label className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-xs font-semibold cursor-pointer inline-flex items-center gap-1.5 shrink-0">
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>{uploadingField === 'free-pdfs' ? '...' : 'PDF'}</span>
+                  <input
+                    type="file"
+                    accept="application/pdf"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) handleStorageUpload(f, 'free-pdfs', setFbPdf);
+                    }}
+                  />
+                </label>
+              </div>
+              <div className="sm:col-span-2">
+                <button
+                  type="submit"
+                  className="px-4 py-2 rounded-xl bg-[#D4AF37] text-[#09090B] text-xs font-semibold"
+                >
+                  Publish Free PDF
+                </button>
+              </div>
+            </form>
+
+            <div className="space-y-3">
+              {allFreeBooks.map((b) => (
+                <div
+                  key={b.id}
+                  className="apple-surface rounded-xl p-4 flex items-center justify-between gap-4"
+                >
+                  <div>
+                    <p className="text-sm font-semibold">{b.name}</p>
+                    <p className="text-xs font-mono text-[#A1A1AA]">
+                      {b.views} views · {b.downloads} downloads · {b.status}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setConfirmAction({
+                        title: 'Delete Free PDF?',
+                        description: `Remove "${b.name}" from Free PDFs?`,
+                        onConfirm: async () => {
+                          await deleteDoc(doc(db, 'freeBooks', b.id));
+                          showToast('ok', 'Free PDF deleted.');
+                        },
+                      })
+                    }
+                    className="p-2 rounded-lg text-[#FF453A] hover:bg-[#FF453A]/15"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* 7. PAID PDFS */}
+        {activeTab === 'paid-pdfs' && (
+          <div className="space-y-6">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div>
+                <h1 className="text-2xl font-semibold">Paid PDF Bookstore</h1>
+                <p className="text-xs text-[#A1A1AA] font-mono">
+                  Google Sheet Columns: id, name, description, cover_url, price, pdf_url, status
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={syncingSheets}
+                onClick={() => handleSyncSheets('paid-pdfs')}
+                className="px-4 py-2 rounded-xl bg-[#D4AF37] text-[#09090B] text-xs font-semibold inline-flex items-center gap-2"
+              >
+                <FolderSync className="w-4 h-4" />
+                <span>Sync From Google Sheets</span>
+              </button>
+            </div>
+
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                const id = sanitizeId(`paid_${Date.now()}`);
+                const batch = writeBatch(db);
+                batch.set(doc(db, 'paidBooksPublic', id), {
+                  id,
+                  name: clampStr(pbName, 200),
+                  description: clampStr(pbDesc, 1000),
+                  coverUrl: clampStr(pbCover || ASSETS.bookXauusd, 500),
+                  price: Math.max(0, Number(pbPrice) || 29),
+                  status: 'ACTIVE',
+                  createdAt: serverTimestamp(),
+                  updatedAt: serverTimestamp(),
+                });
+                batch.set(doc(db, 'paidBooksProtected', id), {
+                  id,
+                  pdfUrl: clampStr(pbPdf, 500),
+                  updatedAt: serverTimestamp(),
+                });
+                await batch.commit();
+                setPbName('');
+                setPbDesc('');
+                setPbCover('');
+                setPbPdf('');
+                showToast('ok', 'Paid book published with protected download vault.');
+              }}
+              className="apple-surface rounded-2xl p-5 grid grid-cols-1 sm:grid-cols-2 gap-4"
+            >
+              <input
+                type="text"
+                required
+                placeholder="Book Name"
+                value={pbName}
+                onChange={(e) => setPbName(e.target.value)}
+                className="px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm"
+              />
+              <input
+                type="number"
+                required
+                min="0"
+                step="any"
+                placeholder="Price USD"
+                value={pbPrice}
+                onChange={(e) => setPbPrice(e.target.value)}
+                className="px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm font-mono"
+              />
+              <input
+                type="text"
+                required
+                placeholder="Description"
+                value={pbDesc}
+                onChange={(e) => setPbDesc(e.target.value)}
+                className="sm:col-span-2 px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm"
+              />
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  placeholder="Cover URL"
+                  value={pbCover}
+                  onChange={(e) => setPbCover(e.target.value)}
+                  className="flex-1 px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm"
+                />
+                <label className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-xs font-semibold cursor-pointer inline-flex items-center gap-1.5 shrink-0">
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>Cover</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) handleStorageUpload(f, 'paid-covers', setPbCover);
+                    }}
+                  />
+                </label>
+              </div>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  required
+                  placeholder="Protected PDF URL"
+                  value={pbPdf}
+                  onChange={(e) => setPbPdf(e.target.value)}
+                  className="flex-1 px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm"
+                />
+                <label className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-xs font-semibold cursor-pointer inline-flex items-center gap-1.5 shrink-0">
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>PDF</span>
+                  <input
+                    type="file"
+                    accept="application/pdf"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) handleStorageUpload(f, 'protected-pdfs', setPbPdf);
+                    }}
+                  />
+                </label>
+              </div>
+              <div className="sm:col-span-2">
+                <button
+                  type="submit"
+                  className="px-4 py-2 rounded-xl bg-[#D4AF37] text-[#09090B] text-xs font-semibold"
+                >
+                  Publish Paid PDF
+                </button>
+              </div>
+            </form>
+
+            <div className="space-y-3">
+              {allPaidBooks.map((b) => (
+                <div
+                  key={b.id}
+                  className="apple-surface rounded-xl p-4 flex items-center justify-between gap-4"
+                >
+                  <div>
+                    <p className="text-sm font-semibold">
+                      {b.name} · <span className="font-mono text-[#E5C76B]">${b.price}</span>
+                    </p>
+                    <p className="text-xs text-[#A1A1AA]">{b.description}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setConfirmAction({
+                        title: 'Delete Paid Book?',
+                        description: `Remove "${b.name}" from Paid PDFs?`,
+                        onConfirm: async () => {
+                          const batch = writeBatch(db);
+                          batch.delete(doc(db, 'paidBooksPublic', b.id));
+                          batch.delete(doc(db, 'paidBooksProtected', b.id));
+                          await batch.commit();
+                          showToast('ok', 'Paid book removed.');
+                        },
+                      })
+                    }
+                    className="p-2 rounded-lg text-[#FF453A] hover:bg-[#FF453A]/15"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* 8. USERS */}
+        {activeTab === 'users' && (
+          <div className="space-y-6">
+            <h1 className="text-2xl font-semibold">Registered Members &amp; VIP Control</h1>
+            <div className="space-y-3">
+              {allUsers.map((u) => {
+                const g = allGrants[u.uid];
+                return (
+                  <div
+                    key={u.uid}
+                    className="apple-surface rounded-2xl p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4"
+                  >
+                    <div className="space-y-1 text-xs">
+                      <p className="text-sm font-semibold text-[#F5F5F7]">
+                        {u.name} · <span className="text-[#A1A1AA]">{u.email}</span>
+                      </p>
+                      <p className="text-[#A1A1AA] font-mono">
+                        Telegram: {u.telegram || '—'} · VIP: {g?.vipType || 'NONE'} (
+                        {g?.vipStatus || 'NONE'})
+                        {g?.vipType === 'MONTHLY' &&
+                          ` · Expires ${new Date(g.vipExpiryMs).toLocaleDateString()}`}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleManualUserVip(u.uid, 'LIFETIME')}
+                        className="px-3 py-1.5 rounded-lg bg-[#D4AF37] text-[#09090B] text-xs font-semibold"
+                      >
+                        Grant Lifetime
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleManualUserVip(u.uid, 'EXTEND_30D')}
+                        className="px-3 py-1.5 rounded-lg bg-white/10 text-xs font-semibold"
+                      >
+                        +30 Days Monthly
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleManualUserVip(u.uid, 'REVOKE')}
+                        className="px-3 py-1.5 rounded-lg bg-[#FF453A]/20 text-[#FF453A] text-xs font-semibold"
+                      >
+                        Revoke VIP
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* 9. NOTIFICATIONS */}
+        {activeTab === 'notifications' && (
+          <div className="space-y-6">
+            <h1 className="text-2xl font-semibold">Apple Popup Notifications</h1>
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                const id = sanitizeId(`notif_${Date.now()}`);
+                await setDoc(doc(db, 'notifications', id), {
+                  id,
+                  targetUid: 'ALL',
+                  title: clampStr(notifTitle, 120),
+                  message: clampStr(notifMsg, 500),
+                  icon: 'bell',
+                  buttonText: clampStr(notifBtnText, 60),
+                  buttonUrl: clampStr(notifBtnUrl, 500),
+                  active: true,
+                  createdAt: serverTimestamp(),
+                  updatedAt: serverTimestamp(),
+                });
+                setNotifTitle('');
+                setNotifMsg('');
+                setNotifBtnText('');
+                setNotifBtnUrl('');
+                showToast('ok', 'Broadcast notification published.');
+              }}
+              className="apple-surface rounded-2xl p-5 grid grid-cols-1 sm:grid-cols-2 gap-4"
+            >
+              <input
+                type="text"
+                required
+                placeholder="Notification Title"
+                value={notifTitle}
+                onChange={(e) => setNotifTitle(e.target.value)}
+                className="px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm"
+              />
+              <input
+                type="text"
+                required
+                placeholder="Message"
+                value={notifMsg}
+                onChange={(e) => setNotifMsg(e.target.value)}
+                className="px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm"
+              />
+              <input
+                type="text"
+                placeholder="Optional Button Label (e.g. View Signal)"
+                value={notifBtnText}
+                onChange={(e) => setNotifBtnText(e.target.value)}
+                className="px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm"
+              />
+              <input
+                type="text"
+                placeholder="Optional Button URL (e.g. /index.html#signals)"
+                value={notifBtnUrl}
+                onChange={(e) => setNotifBtnUrl(e.target.value)}
+                className="px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm"
+              />
+              <div className="sm:col-span-2">
+                <button
+                  type="submit"
+                  className="px-4 py-2 rounded-xl bg-[#D4AF37] text-[#09090B] text-xs font-semibold"
+                >
+                  Send Apple Broadcast Popup
+                </button>
+              </div>
+            </form>
+
+            <div className="space-y-3">
+              {allNotifs.map((n) => (
+                <div
+                  key={n.id}
+                  className="apple-surface rounded-xl p-4 flex items-center justify-between gap-4"
+                >
+                  <div className="text-xs">
+                    <p className="text-sm font-semibold text-[#F5F5F7]">
+                      {n.title} · <span className="text-[#8E8E93]">Target: {n.targetUid}</span>
+                    </p>
+                    <p className="text-[#A1A1AA]">{n.message}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateDoc(doc(db, 'notifications', n.id), {
+                          active: !n.active,
+                          updatedAt: serverTimestamp(),
+                        })
+                      }
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${
+                        n.active
+                          ? 'bg-[#30D158]/20 text-[#30D158]'
+                          : 'bg-white/10 text-[#A1A1AA]'
+                      }`}
+                    >
+                      {n.active ? 'Active' : 'Inactive'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => deleteDoc(doc(db, 'notifications', n.id))}
+                      className="p-2 rounded-lg text-[#FF453A] hover:bg-[#FF453A]/15"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* 10. STATISTICS */}
+        {activeTab === 'statistics' && (
+          <div className="space-y-6">
+            <h1 className="text-2xl font-semibold">Visitor &amp; Academy Analytics</h1>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 font-mono tabular-nums">
+              <div className="apple-surface rounded-2xl p-5">
+                <p className="text-xs font-sans text-[#A1A1AA]">Today</p>
+                <p className="mt-2 text-2xl font-semibold text-[#F5F5F7]">
+                  {visitorStats.todayCount.toLocaleString()}
+                </p>
+              </div>
+              <div className="apple-surface rounded-2xl p-5">
+                <p className="text-xs font-sans text-[#A1A1AA]">This Week</p>
+                <p className="mt-2 text-2xl font-semibold text-[#F5F5F7]">
+                  {visitorStats.weekCount.toLocaleString()}
+                </p>
+              </div>
+              <div className="apple-surface rounded-2xl p-5">
+                <p className="text-xs font-sans text-[#A1A1AA]">This Month</p>
+                <p className="mt-2 text-2xl font-semibold text-[#E5C76B]">
+                  {visitorStats.monthCount.toLocaleString()}
+                </p>
+              </div>
+              <div className="apple-surface rounded-2xl p-5">
+                <p className="text-xs font-sans text-[#A1A1AA]">Total Unique Visits</p>
+                <p className="mt-2 text-2xl font-semibold text-[#30D158]">
+                  {visitorStats.totalCount.toLocaleString()}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 11. SETTINGS */}
+        {activeTab === 'settings' && (
+          <form onSubmit={handleSaveSettings} className="space-y-8 max-w-4xl">
+            <div className="flex items-center justify-between">
+              <h1 className="text-2xl font-semibold">Academy Configuration</h1>
+              <button
+                type="submit"
+                className="px-5 py-2.5 rounded-xl bg-[#D4AF37] text-[#09090B] text-xs font-semibold hover:bg-[#E5C76B]"
+              >
+                Save All Settings
+              </button>
+            </div>
+
+            {/* Brand & Statistics */}
+            <section className="apple-surface rounded-2xl p-6 space-y-4">
+              <h2 className="text-base font-semibold">Branding &amp; Pip Convention</h2>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs text-[#A1A1AA] mb-1">Website Name</label>
+                  <input
+                    type="text"
+                    value={draftSettings.siteName}
+                    onChange={(e) =>
+                      setDraftSettings({ ...draftSettings, siteName: e.target.value })
+                    }
+                    className="w-full px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-[#A1A1AA] mb-1">Win Rate Display</label>
+                  <input
+                    type="text"
+                    value={draftSettings.winRate}
+                    onChange={(e) =>
+                      setDraftSettings({ ...draftSettings, winRate: e.target.value })
+                    }
+                    className="w-full px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-[#A1A1AA] mb-1">
+                    XAUUSD Pip Multiplier (e.g. 10 =&gt; $10 move = 100 pips)
+                  </label>
+                  <input
+                    type="number"
+                    step="any"
+                    value={draftSettings.pipMultiplier}
+                    onChange={(e) =>
+                      setDraftSettings({
+                        ...draftSettings,
+                        pipMultiplier: Number(e.target.value) || 10,
+                      })
+                    }
+                    className="w-full px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-[#A1A1AA] mb-1">Logo URL / Upload</label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={draftSettings.logoUrl}
+                      onChange={(e) =>
+                        setDraftSettings({ ...draftSettings, logoUrl: e.target.value })
+                      }
+                      className="flex-1 px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm"
+                    />
+                    <label className="px-3 py-2 rounded-xl bg-white/10 text-xs font-semibold cursor-pointer inline-flex items-center">
+                      Upload
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0];
+                          if (f)
+                            handleStorageUpload(f, 'brand', (url) =>
+                              setDraftSettings((s) => ({ ...s, logoUrl: url }))
+                            );
+                        }}
+                      />
+                    </label>
+                  </div>
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs text-[#A1A1AA] mb-1">Hero Subtitle</label>
+                <input
+                  type="text"
+                  value={draftSettings.heroSubtitle}
+                  onChange={(e) =>
+                    setDraftSettings({ ...draftSettings, heroSubtitle: e.target.value })
+                  }
+                  className="w-full px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-[#A1A1AA] mb-1">Website / MSNR Overview</label>
+                <textarea
+                  rows={3}
+                  value={draftSettings.msnrDescription}
+                  onChange={(e) =>
+                    setDraftSettings({ ...draftSettings, msnrDescription: e.target.value })
+                  }
+                  className="w-full px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm"
+                />
+              </div>
+            </section>
+
+            {/* YouTube Channel & Gate */}
+            <section className="apple-surface rounded-2xl p-6 space-y-4">
+              <div className="flex items-center justify-between">
+                <h2 className="text-base font-semibold">YouTube Channel &amp; Subscriber Gate</h2>
+                <label className="flex items-center gap-2 text-xs">
+                  <input
+                    type="checkbox"
+                    checked={draftSettings.youtubeGateEnabled}
+                    onChange={(e) =>
+                      setDraftSettings({
+                        ...draftSettings,
+                        youtubeGateEnabled: e.target.checked,
+                      })
+                    }
+                  />
+                  <span>Enable YouTube Subscription Gate</span>
+                </label>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-xs text-[#A1A1AA] mb-1">YouTube Channel ID</label>
+                  <input
+                    type="text"
+                    placeholder="UC..."
+                    value={draftSettings.youtubeChannelId}
+                    onChange={(e) =>
+                      setDraftSettings({ ...draftSettings, youtubeChannelId: e.target.value })
+                    }
+                    className="w-full px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-[#A1A1AA] mb-1">YouTube Channel URL</label>
+                  <input
+                    type="url"
+                    value={draftSettings.youtubeChannelUrl}
+                    onChange={(e) =>
+                      setDraftSettings({ ...draftSettings, youtubeChannelUrl: e.target.value })
+                    }
+                    className="w-full px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-[#A1A1AA] mb-1">
+                    Fallback Subscriber Count
+                  </label>
+                  <input
+                    type="text"
+                    value={draftSettings.subscriberCountFallback}
+                    onChange={(e) =>
+                      setDraftSettings({
+                        ...draftSettings,
+                        subscriberCountFallback: e.target.value,
+                      })
+                    }
+                    className="w-full px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm font-mono"
+                  />
+                </div>
+              </div>
+            </section>
+
+            {/* VIP Payment Methods (Exness, Binance Pay, Option 3) */}
+            <section className="apple-surface rounded-2xl p-6 space-y-4">
+              <h2 className="text-base font-semibold">VIP Joining &amp; Payment Configuration</h2>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs text-[#A1A1AA] mb-1">Exness Referral URL</label>
+                  <input
+                    type="url"
+                    value={draftSettings.exnessReferralUrl}
+                    onChange={(e) =>
+                      setDraftSettings({ ...draftSettings, exnessReferralUrl: e.target.value })
+                    }
+                    className="w-full px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-[#A1A1AA] mb-1">
+                    Minimum Exness Deposit ($)
+                  </label>
+                  <input
+                    type="number"
+                    value={draftSettings.exnessMinDeposit}
+                    onChange={(e) =>
+                      setDraftSettings({
+                        ...draftSettings,
+                        exnessMinDeposit: Number(e.target.value) || 30,
+                      })
+                    }
+                    className="w-full px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-[#A1A1AA] mb-1">Binance Pay ID</label>
+                  <input
+                    type="text"
+                    value={draftSettings.binancePayId}
+                    onChange={(e) =>
+                      setDraftSettings({ ...draftSettings, binancePayId: e.target.value })
+                    }
+                    className="w-full px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-[#A1A1AA] mb-1">
+                    Monthly VIP Price ($)
+                  </label>
+                  <input
+                    type="number"
+                    value={draftSettings.vipMonthlyPrice}
+                    onChange={(e) =>
+                      setDraftSettings({
+                        ...draftSettings,
+                        vipMonthlyPrice: Number(e.target.value) || 15,
+                      })
+                    }
+                    className="w-full px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-[#A1A1AA] mb-1">Binance QR Image</label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={draftSettings.binanceQrUrl}
+                      onChange={(e) =>
+                        setDraftSettings({ ...draftSettings, binanceQrUrl: e.target.value })
+                      }
+                      className="flex-1 px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm"
+                    />
+                    <label className="px-3 py-2 rounded-xl bg-white/10 text-xs font-semibold cursor-pointer">
+                      QR Upload
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0];
+                          if (f)
+                            handleStorageUpload(f, 'binance', (url) =>
+                              setDraftSettings((s) => ({ ...s, binanceQrUrl: url }))
+                            );
+                        }}
+                      />
+                    </label>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs text-[#A1A1AA] mb-1">Binance Logo Image</label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={draftSettings.binanceLogoUrl}
+                      onChange={(e) =>
+                        setDraftSettings({ ...draftSettings, binanceLogoUrl: e.target.value })
+                      }
+                      className="flex-1 px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm"
+                    />
+                    <label className="px-3 py-2 rounded-xl bg-white/10 text-xs font-semibold cursor-pointer">
+                      Logo Upload
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0];
+                          if (f)
+                            handleStorageUpload(f, 'binance', (url) =>
+                              setDraftSettings((s) => ({ ...s, binanceLogoUrl: url }))
+                            );
+                        }}
+                      />
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              <div className="pt-4 border-t border-white/[0.08] space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-semibold">Option 3 — Custom VIP Method</h3>
+                  <label className="flex items-center gap-2 text-xs">
+                    <input
+                      type="checkbox"
+                      checked={draftSettings.thirdMethodEnabled}
+                      onChange={(e) =>
+                        setDraftSettings({
+                          ...draftSettings,
+                          thirdMethodEnabled: e.target.checked,
+                        })
+                      }
+                    />
+                    <span>Active</span>
+                  </label>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <input
+                    type="text"
+                    placeholder="Title"
+                    value={draftSettings.thirdMethodTitle}
+                    onChange={(e) =>
+                      setDraftSettings({ ...draftSettings, thirdMethodTitle: e.target.value })
+                    }
+                    className="px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Price Label"
+                    value={draftSettings.thirdMethodPrice}
+                    onChange={(e) =>
+                      setDraftSettings({ ...draftSettings, thirdMethodPrice: e.target.value })
+                    }
+                    className="px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Payment Method"
+                    value={draftSettings.thirdMethodPayment}
+                    onChange={(e) =>
+                      setDraftSettings({ ...draftSettings, thirdMethodPayment: e.target.value })
+                    }
+                    className="px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm"
+                  />
+                </div>
+                <input
+                  type="text"
+                  placeholder="Required Field Prompt"
+                  value={draftSettings.thirdMethodFields}
+                  onChange={(e) =>
+                    setDraftSettings({ ...draftSettings, thirdMethodFields: e.target.value })
+                  }
+                  className="w-full px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm"
+                />
+                <textarea
+                  rows={2}
+                  placeholder="Instructions"
+                  value={draftSettings.thirdMethodInstructions}
+                  onChange={(e) =>
+                    setDraftSettings({
+                      ...draftSettings,
+                      thirdMethodInstructions: e.target.value,
+                    })
+                  }
+                  className="w-full px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm"
+                />
+              </div>
+            </section>
+
+            {/* Google Sheets & Contact */}
+            <section className="apple-surface rounded-2xl p-6 space-y-4">
+              <h2 className="text-base font-semibold">Google Sheets Sync &amp; Contact Links</h2>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <input
+                  type="text"
+                  placeholder="Google Spreadsheet ID (Optional OAuth v4 Sync)"
+                  value={draftSettings.sheetsSpreadsheetId}
+                  onChange={(e) =>
+                    setDraftSettings({ ...draftSettings, sheetsSpreadsheetId: e.target.value })
+                  }
+                  className="px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm font-mono"
+                />
+                <input
+                  type="text"
+                  placeholder="Published Videos Sheet CSV URL"
+                  value={draftSettings.sheetsVideosUrl}
+                  onChange={(e) =>
+                    setDraftSettings({ ...draftSettings, sheetsVideosUrl: e.target.value })
+                  }
+                  className="px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm"
+                />
+                <input
+                  type="text"
+                  placeholder="Published Free PDFs Sheet CSV URL"
+                  value={draftSettings.sheetsFreePdfsUrl}
+                  onChange={(e) =>
+                    setDraftSettings({ ...draftSettings, sheetsFreePdfsUrl: e.target.value })
+                  }
+                  className="px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm"
+                />
+                <input
+                  type="text"
+                  placeholder="Published Paid PDFs Sheet CSV URL"
+                  value={draftSettings.sheetsPaidPdfsUrl}
+                  onChange={(e) =>
+                    setDraftSettings({ ...draftSettings, sheetsPaidPdfsUrl: e.target.value })
+                  }
+                  className="px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm"
+                />
+                <input
+                  type="text"
+                  placeholder="Telegram (@TradeWithAmithBot or https://t.me/...)"
+                  value={draftSettings.telegramUrl}
+                  onChange={(e) =>
+                    setDraftSettings({ ...draftSettings, telegramUrl: e.target.value })
+                  }
+                  className="px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm"
+                />
+                <input
+                  type="email"
+                  placeholder="Contact Email"
+                  value={draftSettings.contactEmail}
+                  onChange={(e) =>
+                    setDraftSettings({ ...draftSettings, contactEmail: e.target.value })
+                  }
+                  className="px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm"
+                />
+                <input
+                  type="url"
+                  placeholder="Social / Instagram URL"
+                  value={draftSettings.instagramUrl}
+                  onChange={(e) =>
+                    setDraftSettings({ ...draftSettings, instagramUrl: e.target.value })
+                  }
+                  className="px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm"
+                />
+                <input
+                  type="text"
+                  placeholder="30-Second Notification Message"
+                  value={draftSettings.onboardingNotifMessage}
+                  onChange={(e) =>
+                    setDraftSettings({
+                      ...draftSettings,
+                      onboardingNotifMessage: e.target.value,
+                    })
+                  }
+                  className="px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm"
+                />
+              </div>
+            </section>
+          </form>
+        )}
+      </main>
+
+      {/* Confirmation Dialog for Destructive Actions */}
+      {confirmAction && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 bg-black/75 backdrop-blur-md flex items-center justify-center p-4"
+        >
+          <div className="w-full max-w-sm apple-window rounded-2xl p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-semibold text-[#F5F5F7]">{confirmAction.title}</h3>
+              <button
+                type="button"
+                onClick={() => setConfirmAction(null)}
+                className="text-[#8E8E93] hover:text-[#F5F5F7]"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <p className="text-xs sm:text-sm text-[#A1A1AA] leading-relaxed">
+              {confirmAction.description}
+            </p>
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setConfirmAction(null)}
+                className="px-4 py-2 rounded-xl bg-white/10 text-xs font-medium text-[#F5F5F7]"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  const fn = confirmAction.onConfirm;
+                  setConfirmAction(null);
+                  await fn();
+                }}
+                className="px-4 py-2 rounded-xl bg-[#FF453A] text-white text-xs font-semibold"
+              >
+                Confirm Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};

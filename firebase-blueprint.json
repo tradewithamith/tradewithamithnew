@@ -1,0 +1,713 @@
+{
+  "entities": {
+    "AdminRecord": {
+      "title": "AdminRecord",
+      "description": "Trusted administrator registry document.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "email", "createdAt"]
+    },
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Private user account profile isolated to owner and admins.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "email": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 256
+        },
+        "telegram": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "youtubeVerified": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "name", "email", "telegram", "youtubeVerified", "createdAt", "updatedAt"]
+    },
+    "VipGrant": {
+      "title": "VipGrant",
+      "description": "Admin-controlled VIP authorization and expiry record.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "vipStatus": {
+          "type": "string",
+          "enum": ["NONE", "ACTIVE", "EXPIRED", "REVOKED"]
+        },
+        "vipType": {
+          "type": "string",
+          "enum": ["NONE", "LIFETIME", "MONTHLY", "CUSTOM"]
+        },
+        "approvalStatus": {
+          "type": "string",
+          "enum": ["NONE", "PENDING", "APPROVED", "REJECTED"]
+        },
+        "vipExpiry": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["userId", "vipStatus", "vipType", "approvalStatus", "vipExpiry", "updatedAt"]
+    },
+    "VipSignalPublic": {
+      "title": "VipSignalPublic",
+      "description": "Publicly visible metadata for XAUUSD signals without sensitive entry/TP/SL prices.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "date": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "currency": {
+          "type": "string",
+          "enum": ["XAUUSD"]
+        },
+        "direction": {
+          "type": "string",
+          "enum": ["BUY", "SELL"]
+        },
+        "orderType": {
+          "type": "string",
+          "enum": ["LIMIT", "MARKET"]
+        },
+        "result": {
+          "type": "string",
+          "enum": ["ACTIVE", "TP HIT", "SL HIT", "CLOSED"]
+        },
+        "pips": {
+          "type": "number"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "date", "currency", "direction", "orderType", "result", "pips", "createdAt", "updatedAt"]
+    },
+    "VipSignalPrivate": {
+      "title": "VipSignalPrivate",
+      "description": "VIP-protected XAUUSD execution levels and trade notes.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "currency": {
+          "type": "string",
+          "enum": ["XAUUSD"]
+        },
+        "entry": {
+          "type": "number"
+        },
+        "tp": {
+          "type": "number"
+        },
+        "extraTp": {
+          "type": "number"
+        },
+        "sl": {
+          "type": "number"
+        },
+        "note": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "currency", "entry", "tp", "extraTp", "sl", "note", "createdAt", "updatedAt"]
+    },
+    "VipRequest": {
+      "title": "VipRequest",
+      "description": "User-submitted VIP verification request for Exness, Binance Pay, or custom method.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "userId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "email": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 256
+        },
+        "telegram": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 64
+        },
+        "method": {
+          "type": "string",
+          "enum": ["EXNESS", "BINANCE", "CUSTOM"]
+        },
+        "exnessId": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "transactionId": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "customDetails": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "status": {
+          "type": "string",
+          "enum": ["PENDING", "APPROVED", "REJECTED"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "userId", "name", "email", "telegram", "method", "exnessId", "transactionId", "customDetails", "status", "createdAt", "updatedAt"]
+    },
+    "AcademyVideo": {
+      "title": "AcademyVideo",
+      "description": "Educational MSNR & XAUUSD video synchronized from Google Sheets or Admin.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "youtubeUrl": {
+          "type": "string",
+          "minLength": 5,
+          "maxLength": 500
+        },
+        "thumbnail": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "date": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "status": {
+          "type": "string",
+          "enum": ["ACTIVE", "INACTIVE"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "title", "youtubeUrl", "thumbnail", "description", "date", "status", "createdAt", "updatedAt"]
+    },
+    "FreeBook": {
+      "title": "FreeBook",
+      "description": "Free educational PDF resource with tracked view and download counts.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "coverUrl": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "pdfUrl": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "views": {
+          "type": "number"
+        },
+        "downloads": {
+          "type": "number"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["ACTIVE", "INACTIVE"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "name", "description", "coverUrl", "pdfUrl", "views", "downloads", "status", "createdAt", "updatedAt"]
+    },
+    "PaidBookPublic": {
+      "title": "PaidBookPublic",
+      "description": "Public storefront card for a paid digital book without exposing its protected PDF URL.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "coverUrl": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "price": {
+          "type": "number"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["ACTIVE", "INACTIVE"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "name", "description", "coverUrl", "price", "status", "createdAt", "updatedAt"]
+    },
+    "PaidBookProtected": {
+      "title": "PaidBookProtected",
+      "description": "Protected download file reference accessible only to users with approved per-book access.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "pdfUrl": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "pdfUrl", "updatedAt"]
+    },
+    "BookPurchase": {
+      "title": "BookPurchase",
+      "description": "User payment submission for an individual paid digital book.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "userId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "userEmail": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 256
+        },
+        "bookId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "bookName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "price": {
+          "type": "number"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "telegram": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 64
+        },
+        "transactionId": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 120
+        },
+        "status": {
+          "type": "string",
+          "enum": ["PENDING", "APPROVED", "REJECTED"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "userId", "userEmail", "bookId", "bookName", "price", "name", "telegram", "transactionId", "status", "createdAt", "updatedAt"]
+    },
+    "BookAccess": {
+      "title": "BookAccess",
+      "description": "Admin-issued per-book entitlement document keyed by userId_bookId.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 260,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "userId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "bookId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["APPROVED", "REVOKED"]
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "userId", "bookId", "status", "updatedAt"]
+    },
+    "AppNotification": {
+      "title": "AppNotification",
+      "description": "Apple-style broadcast or targeted user notification.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "targetUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "icon": {
+          "type": "string",
+          "maxLength": 60
+        },
+        "buttonText": {
+          "type": "string",
+          "maxLength": 60
+        },
+        "buttonUrl": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "active": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "targetUid", "title", "message", "icon", "buttonText", "buttonUrl", "active", "createdAt", "updatedAt"]
+    },
+    "AcademySettings": {
+      "title": "AcademySettings",
+      "description": "Global academy configuration managed from the Admin Dashboard.",
+      "type": "object",
+      "properties": {
+        "siteName": { "type": "string", "maxLength": 120 },
+        "logoUrl": { "type": "string", "maxLength": 500 },
+        "heroSubtitle": { "type": "string", "maxLength": 300 },
+        "msnrDescription": { "type": "string", "maxLength": 1500 },
+        "winRate": { "type": "string", "maxLength": 30 },
+        "subscriberCountFallback": { "type": "string", "maxLength": 40 },
+        "youtubeChannelId": { "type": "string", "maxLength": 80 },
+        "youtubeChannelUrl": { "type": "string", "maxLength": 300 },
+        "youtubeGateEnabled": { "type": "boolean" },
+        "pipMultiplier": { "type": "number" },
+        "binancePayId": { "type": "string", "maxLength": 80 },
+        "binanceQrUrl": { "type": "string", "maxLength": 500 },
+        "binanceLogoUrl": { "type": "string", "maxLength": 500 },
+        "vipMonthlyPrice": { "type": "number" },
+        "exnessReferralUrl": { "type": "string", "maxLength": 500 },
+        "exnessMinDeposit": { "type": "number" },
+        "thirdMethodEnabled": { "type": "boolean" },
+        "thirdMethodTitle": { "type": "string", "maxLength": 120 },
+        "thirdMethodDescription": { "type": "string", "maxLength": 600 },
+        "thirdMethodPrice": { "type": "string", "maxLength": 60 },
+        "thirdMethodPayment": { "type": "string", "maxLength": 120 },
+        "thirdMethodInstructions": { "type": "string", "maxLength": 800 },
+        "thirdMethodFields": { "type": "string", "maxLength": 300 },
+        "telegramUrl": { "type": "string", "maxLength": 300 },
+        "contactEmail": { "type": "string", "maxLength": 200 },
+        "instagramUrl": { "type": "string", "maxLength": 300 },
+        "sheetsVideosUrl": { "type": "string", "maxLength": 500 },
+        "sheetsFreePdfsUrl": { "type": "string", "maxLength": 500 },
+        "sheetsPaidPdfsUrl": { "type": "string", "maxLength": 500 },
+        "sheetsSpreadsheetId": { "type": "string", "maxLength": 150 },
+        "onboardingNotifEnabled": { "type": "boolean" },
+        "onboardingNotifTitle": { "type": "string", "maxLength": 120 },
+        "onboardingNotifMessage": { "type": "string", "maxLength": 300 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "siteName", "logoUrl", "heroSubtitle", "msnrDescription", "winRate",
+        "subscriberCountFallback", "youtubeChannelId", "youtubeChannelUrl",
+        "youtubeGateEnabled", "pipMultiplier", "binancePayId", "binanceQrUrl",
+        "binanceLogoUrl", "vipMonthlyPrice", "exnessReferralUrl", "exnessMinDeposit",
+        "thirdMethodEnabled", "thirdMethodTitle", "thirdMethodDescription",
+        "thirdMethodPrice", "thirdMethodPayment", "thirdMethodInstructions",
+        "thirdMethodFields", "telegramUrl", "contactEmail", "instagramUrl",
+        "sheetsVideosUrl", "sheetsFreePdfsUrl", "sheetsPaidPdfsUrl",
+        "sheetsSpreadsheetId", "onboardingNotifEnabled", "onboardingNotifTitle",
+        "onboardingNotifMessage", "updatedAt"
+      ]
+    },
+    "VisitorSession": {
+      "title": "VisitorSession",
+      "description": "Deduplicated daily visitor marker keyed by dayKey_uid.",
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string",
+          "maxLength": 160,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "uid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "dayKey": {
+          "type": "string",
+          "maxLength": 20
+        },
+        "monthKey": {
+          "type": "string",
+          "maxLength": 20
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["sessionId", "uid", "dayKey", "monthKey", "createdAt"]
+    },
+    "VisitorStatistics": {
+      "title": "VisitorStatistics",
+      "description": "Aggregated visitor statistics for Today, This Week, This Month, and Total.",
+      "type": "object",
+      "properties": {
+        "dayKey": { "type": "string", "maxLength": 20 },
+        "weekKey": { "type": "string", "maxLength": 20 },
+        "monthKey": { "type": "string", "maxLength": 20 },
+        "todayCount": { "type": "number" },
+        "weekCount": { "type": "number" },
+        "monthCount": { "type": "number" },
+        "totalCount": { "type": "number" },
+        "lastSessionId": { "type": "string", "maxLength": 160 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["dayKey", "weekKey", "monthKey", "todayCount", "weekCount", "monthCount", "totalCount", "lastSessionId", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/admins/{adminId}": {
+      "schema": "AdminRecord",
+      "description": "Trusted administrator lookup documents."
+    },
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "PII-isolated user profiles."
+    },
+    "/vipGrants/{userId}": {
+      "schema": "VipGrant",
+      "description": "Admin-managed VIP tier and expiration grants."
+    },
+    "/vipSignalsPublic/{signalId}": {
+      "schema": "VipSignalPublic",
+      "description": "Public signal cards with sensitive execution prices omitted."
+    },
+    "/vipSignalsPrivate/{signalId}": {
+      "schema": "VipSignalPrivate",
+      "description": "VIP-restricted XAUUSD entry, TP, SL, and trade notes."
+    },
+    "/vipRequests/{requestId}": {
+      "schema": "VipRequest",
+      "description": "User VIP membership verification requests."
+    },
+    "/videos/{videoId}": {
+      "schema": "AcademyVideo",
+      "description": "Educational video library items."
+    },
+    "/freeBooks/{bookId}": {
+      "schema": "FreeBook",
+      "description": "Free downloadable PDF resources and counters."
+    },
+    "/paidBooksPublic/{bookId}": {
+      "schema": "PaidBookPublic",
+      "description": "Public paid digital book catalog metadata."
+    },
+    "/paidBooksProtected/{bookId}": {
+      "schema": "PaidBookProtected",
+      "description": "Protected download URLs gated by per-book entitlements."
+    },
+    "/bookPurchases/{purchaseId}": {
+      "schema": "BookPurchase",
+      "description": "User payment submissions for individual paid books."
+    },
+    "/bookAccess/{accessId}": {
+      "schema": "BookAccess",
+      "description": "Per-book download entitlement records."
+    },
+    "/notifications/{notifId}": {
+      "schema": "AppNotification",
+      "description": "Broadcast and user-targeted Apple-style notifications."
+    },
+    "/settings/{settingId}": {
+      "schema": "AcademySettings",
+      "description": "Singleton academy settings document."
+    },
+    "/visitorSessions/{sessionId}": {
+      "schema": "VisitorSession",
+      "description": "Deduplicated daily visitor session markers."
+    },
+    "/statistics/{statId}": {
+      "schema": "VisitorStatistics",
+      "description": "Public and admin visitor counters."
+    }
+  }
+}

@@ -1,0 +1,629 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Safety Net (Default Deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Primitive Helpers ---
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidLongId(id) {
+      return id is string && id.size() >= 3 && id.size() <= 260 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isBootstrappedAdmin() {
+      return isVerifiedUser() && request.auth.token.email == 'emoneywithamith@gmail.com';
+    }
+
+    function isAdmin() {
+      return isBootstrappedAdmin() || (
+        isVerifiedUser() &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isActiveVip() {
+      return isVerifiedUser() &&
+        exists(/databases/$(database)/documents/vipGrants/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/vipGrants/$(request.auth.uid)).data.approvalStatus == 'APPROVED' &&
+        get(/databases/$(database)/documents/vipGrants/$(request.auth.uid)).data.vipStatus == 'ACTIVE' &&
+        (
+          get(/databases/$(database)/documents/vipGrants/$(request.auth.uid)).data.vipType == 'LIFETIME' ||
+          (
+            (
+              get(/databases/$(database)/documents/vipGrants/$(request.auth.uid)).data.vipType == 'MONTHLY' ||
+              get(/databases/$(database)/documents/vipGrants/$(request.auth.uid)).data.vipType == 'CUSTOM'
+            ) &&
+            get(/databases/$(database)/documents/vipGrants/$(request.auth.uid)).data.vipExpiry > request.time
+          )
+        );
+    }
+
+    // --- Entity Blueprint Validators ---
+    function isValidAdminRecord(data) {
+      return data.keys().hasAll(['uid', 'email', 'createdAt']) &&
+        data.keys().hasOnly(['uid', 'email', 'createdAt']) &&
+        isValidId(data.uid) &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 256 &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidUserProfile(data) {
+      return data.keys().hasAll(['uid', 'name', 'email', 'telegram', 'youtubeVerified', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'name', 'email', 'telegram', 'youtubeVerified', 'createdAt', 'updatedAt']) &&
+        isValidId(data.uid) &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 100 &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 256 &&
+        data.telegram is string && data.telegram.size() <= 64 &&
+        data.youtubeVerified is bool &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidVipGrant(data) {
+      return data.keys().hasAll(['userId', 'vipStatus', 'vipType', 'approvalStatus', 'vipExpiry', 'updatedAt']) &&
+        data.keys().hasOnly(['userId', 'vipStatus', 'vipType', 'approvalStatus', 'vipExpiry', 'updatedAt']) &&
+        isValidId(data.userId) &&
+        data.vipStatus is string && data.vipStatus.size() <= 20 && data.vipStatus in ['NONE', 'ACTIVE', 'EXPIRED', 'REVOKED'] &&
+        data.vipType is string && data.vipType.size() <= 20 && data.vipType in ['NONE', 'LIFETIME', 'MONTHLY', 'CUSTOM'] &&
+        data.approvalStatus is string && data.approvalStatus.size() <= 20 && data.approvalStatus in ['NONE', 'PENDING', 'APPROVED', 'REJECTED'] &&
+        data.vipExpiry is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidVipSignalPublic(data) {
+      return data.keys().hasAll(['id', 'date', 'currency', 'direction', 'orderType', 'result', 'pips', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'date', 'currency', 'direction', 'orderType', 'result', 'pips', 'createdAt', 'updatedAt']) &&
+        isValidId(data.id) &&
+        data.date is string && data.date.size() >= 1 && data.date.size() <= 40 &&
+        data.currency is string && data.currency.size() <= 20 && data.currency == 'XAUUSD' &&
+        data.direction is string && data.direction.size() <= 10 && data.direction in ['BUY', 'SELL'] &&
+        data.orderType is string && data.orderType.size() <= 10 && data.orderType in ['LIMIT', 'MARKET'] &&
+        data.result is string && data.result.size() <= 15 && data.result in ['ACTIVE', 'TP HIT', 'SL HIT', 'CLOSED'] &&
+        data.pips is number &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidVipSignalPrivate(data) {
+      return data.keys().hasAll(['id', 'currency', 'entry', 'tp', 'extraTp', 'sl', 'note', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'currency', 'entry', 'tp', 'extraTp', 'sl', 'note', 'createdAt', 'updatedAt']) &&
+        isValidId(data.id) &&
+        data.currency is string && data.currency.size() <= 20 && data.currency == 'XAUUSD' &&
+        data.entry is number &&
+        data.tp is number &&
+        data.extraTp is number &&
+        data.sl is number &&
+        data.note is string && data.note.size() <= 1000 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidVipRequest(data) {
+      return data.keys().hasAll(['id', 'userId', 'name', 'email', 'telegram', 'method', 'exnessId', 'transactionId', 'customDetails', 'status', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'userId', 'name', 'email', 'telegram', 'method', 'exnessId', 'transactionId', 'customDetails', 'status', 'createdAt', 'updatedAt']) &&
+        isValidId(data.id) &&
+        isValidId(data.userId) &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 100 &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 256 &&
+        data.telegram is string && data.telegram.size() >= 2 && data.telegram.size() <= 64 &&
+        data.method is string && data.method.size() <= 20 && data.method in ['EXNESS', 'BINANCE', 'CUSTOM'] &&
+        data.exnessId is string && data.exnessId.size() <= 100 &&
+        data.transactionId is string && data.transactionId.size() <= 120 &&
+        data.customDetails is string && data.customDetails.size() <= 500 &&
+        data.status is string && data.status.size() <= 20 && data.status in ['PENDING', 'APPROVED', 'REJECTED'] &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidAcademyVideo(data) {
+      return data.keys().hasAll(['id', 'title', 'youtubeUrl', 'thumbnail', 'description', 'date', 'status', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'title', 'youtubeUrl', 'thumbnail', 'description', 'date', 'status', 'createdAt', 'updatedAt']) &&
+        isValidId(data.id) &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 200 &&
+        data.youtubeUrl is string && data.youtubeUrl.size() >= 5 && data.youtubeUrl.size() <= 500 &&
+        data.thumbnail is string && data.thumbnail.size() <= 500 &&
+        data.description is string && data.description.size() <= 1000 &&
+        data.date is string && data.date.size() <= 40 &&
+        data.status is string && data.status.size() <= 20 && data.status in ['ACTIVE', 'INACTIVE'] &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidFreeBook(data) {
+      return data.keys().hasAll(['id', 'name', 'description', 'coverUrl', 'pdfUrl', 'views', 'downloads', 'status', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'name', 'description', 'coverUrl', 'pdfUrl', 'views', 'downloads', 'status', 'createdAt', 'updatedAt']) &&
+        isValidId(data.id) &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 200 &&
+        data.description is string && data.description.size() <= 1000 &&
+        data.coverUrl is string && data.coverUrl.size() <= 500 &&
+        data.pdfUrl is string && data.pdfUrl.size() >= 1 && data.pdfUrl.size() <= 500 &&
+        data.views is number && data.views >= 0 &&
+        data.downloads is number && data.downloads >= 0 &&
+        data.status is string && data.status.size() <= 20 && data.status in ['ACTIVE', 'INACTIVE'] &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidPaidBookPublic(data) {
+      return data.keys().hasAll(['id', 'name', 'description', 'coverUrl', 'price', 'status', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'name', 'description', 'coverUrl', 'price', 'status', 'createdAt', 'updatedAt']) &&
+        isValidId(data.id) &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 200 &&
+        data.description is string && data.description.size() <= 1000 &&
+        data.coverUrl is string && data.coverUrl.size() <= 500 &&
+        data.price is number && data.price >= 0 &&
+        data.status is string && data.status.size() <= 20 && data.status in ['ACTIVE', 'INACTIVE'] &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidPaidBookProtected(data) {
+      return data.keys().hasAll(['id', 'pdfUrl', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'pdfUrl', 'updatedAt']) &&
+        isValidId(data.id) &&
+        data.pdfUrl is string && data.pdfUrl.size() >= 1 && data.pdfUrl.size() <= 500 &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidBookPurchase(data) {
+      return data.keys().hasAll(['id', 'userId', 'userEmail', 'bookId', 'bookName', 'price', 'name', 'telegram', 'transactionId', 'status', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'userId', 'userEmail', 'bookId', 'bookName', 'price', 'name', 'telegram', 'transactionId', 'status', 'createdAt', 'updatedAt']) &&
+        isValidId(data.id) &&
+        isValidId(data.userId) &&
+        data.userEmail is string && data.userEmail.size() >= 3 && data.userEmail.size() <= 256 &&
+        isValidId(data.bookId) &&
+        data.bookName is string && data.bookName.size() >= 1 && data.bookName.size() <= 200 &&
+        data.price is number && data.price >= 0 &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 100 &&
+        data.telegram is string && data.telegram.size() >= 2 && data.telegram.size() <= 64 &&
+        data.transactionId is string && data.transactionId.size() >= 2 && data.transactionId.size() <= 120 &&
+        data.status is string && data.status.size() <= 20 && data.status in ['PENDING', 'APPROVED', 'REJECTED'] &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidBookAccess(data) {
+      return data.keys().hasAll(['id', 'userId', 'bookId', 'status', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'userId', 'bookId', 'status', 'updatedAt']) &&
+        isValidLongId(data.id) &&
+        isValidId(data.userId) &&
+        isValidId(data.bookId) &&
+        data.status is string && data.status.size() <= 20 && data.status in ['APPROVED', 'REVOKED'] &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidAppNotification(data) {
+      return data.keys().hasAll(['id', 'targetUid', 'title', 'message', 'icon', 'buttonText', 'buttonUrl', 'active', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'targetUid', 'title', 'message', 'icon', 'buttonText', 'buttonUrl', 'active', 'createdAt', 'updatedAt']) &&
+        isValidId(data.id) &&
+        data.targetUid is string && data.targetUid.size() >= 1 && data.targetUid.size() <= 128 &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 120 &&
+        data.message is string && data.message.size() >= 1 && data.message.size() <= 500 &&
+        data.icon is string && data.icon.size() <= 60 &&
+        data.buttonText is string && data.buttonText.size() <= 60 &&
+        data.buttonUrl is string && data.buttonUrl.size() <= 500 &&
+        data.active is bool &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidSettings(data) {
+      return data.keys().hasAll([
+          'siteName', 'logoUrl', 'heroSubtitle', 'msnrDescription', 'winRate',
+          'subscriberCountFallback', 'youtubeChannelId', 'youtubeChannelUrl',
+          'youtubeGateEnabled', 'pipMultiplier', 'binancePayId', 'binanceQrUrl',
+          'binanceLogoUrl', 'vipMonthlyPrice', 'exnessReferralUrl', 'exnessMinDeposit',
+          'thirdMethodEnabled', 'thirdMethodTitle', 'thirdMethodDescription',
+          'thirdMethodPrice', 'thirdMethodPayment', 'thirdMethodInstructions',
+          'thirdMethodFields', 'telegramUrl', 'contactEmail', 'instagramUrl',
+          'sheetsVideosUrl', 'sheetsFreePdfsUrl', 'sheetsPaidPdfsUrl',
+          'sheetsSpreadsheetId', 'onboardingNotifEnabled', 'onboardingNotifTitle',
+          'onboardingNotifMessage', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'siteName', 'logoUrl', 'heroSubtitle', 'msnrDescription', 'winRate',
+          'subscriberCountFallback', 'youtubeChannelId', 'youtubeChannelUrl',
+          'youtubeGateEnabled', 'pipMultiplier', 'binancePayId', 'binanceQrUrl',
+          'binanceLogoUrl', 'vipMonthlyPrice', 'exnessReferralUrl', 'exnessMinDeposit',
+          'thirdMethodEnabled', 'thirdMethodTitle', 'thirdMethodDescription',
+          'thirdMethodPrice', 'thirdMethodPayment', 'thirdMethodInstructions',
+          'thirdMethodFields', 'telegramUrl', 'contactEmail', 'instagramUrl',
+          'sheetsVideosUrl', 'sheetsFreePdfsUrl', 'sheetsPaidPdfsUrl',
+          'sheetsSpreadsheetId', 'onboardingNotifEnabled', 'onboardingNotifTitle',
+          'onboardingNotifMessage', 'updatedAt'
+        ]) &&
+        data.siteName is string && data.siteName.size() <= 120 &&
+        data.logoUrl is string && data.logoUrl.size() <= 500 &&
+        data.heroSubtitle is string && data.heroSubtitle.size() <= 300 &&
+        data.msnrDescription is string && data.msnrDescription.size() <= 1500 &&
+        data.winRate is string && data.winRate.size() <= 30 &&
+        data.subscriberCountFallback is string && data.subscriberCountFallback.size() <= 40 &&
+        data.youtubeChannelId is string && data.youtubeChannelId.size() <= 80 &&
+        data.youtubeChannelUrl is string && data.youtubeChannelUrl.size() <= 300 &&
+        data.youtubeGateEnabled is bool &&
+        data.pipMultiplier is number && data.pipMultiplier > 0 &&
+        data.binancePayId is string && data.binancePayId.size() <= 80 &&
+        data.binanceQrUrl is string && data.binanceQrUrl.size() <= 500 &&
+        data.binanceLogoUrl is string && data.binanceLogoUrl.size() <= 500 &&
+        data.vipMonthlyPrice is number && data.vipMonthlyPrice >= 0 &&
+        data.exnessReferralUrl is string && data.exnessReferralUrl.size() <= 500 &&
+        data.exnessMinDeposit is number && data.exnessMinDeposit >= 0 &&
+        data.thirdMethodEnabled is bool &&
+        data.thirdMethodTitle is string && data.thirdMethodTitle.size() <= 120 &&
+        data.thirdMethodDescription is string && data.thirdMethodDescription.size() <= 600 &&
+        data.thirdMethodPrice is string && data.thirdMethodPrice.size() <= 60 &&
+        data.thirdMethodPayment is string && data.thirdMethodPayment.size() <= 120 &&
+        data.thirdMethodInstructions is string && data.thirdMethodInstructions.size() <= 800 &&
+        data.thirdMethodFields is string && data.thirdMethodFields.size() <= 300 &&
+        data.telegramUrl is string && data.telegramUrl.size() <= 300 &&
+        data.contactEmail is string && data.contactEmail.size() <= 200 &&
+        data.instagramUrl is string && data.instagramUrl.size() <= 300 &&
+        data.sheetsVideosUrl is string && data.sheetsVideosUrl.size() <= 500 &&
+        data.sheetsFreePdfsUrl is string && data.sheetsFreePdfsUrl.size() <= 500 &&
+        data.sheetsPaidPdfsUrl is string && data.sheetsPaidPdfsUrl.size() <= 500 &&
+        data.sheetsSpreadsheetId is string && data.sheetsSpreadsheetId.size() <= 150 &&
+        data.onboardingNotifEnabled is bool &&
+        data.onboardingNotifTitle is string && data.onboardingNotifTitle.size() <= 120 &&
+        data.onboardingNotifMessage is string && data.onboardingNotifMessage.size() <= 300 &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidVisitorSession(data) {
+      return data.keys().hasAll(['sessionId', 'uid', 'dayKey', 'monthKey', 'createdAt']) &&
+        data.keys().hasOnly(['sessionId', 'uid', 'dayKey', 'monthKey', 'createdAt']) &&
+        isValidLongId(data.sessionId) &&
+        isValidId(data.uid) &&
+        data.dayKey is string && data.dayKey.size() >= 8 && data.dayKey.size() <= 20 &&
+        data.monthKey is string && data.monthKey.size() >= 6 && data.monthKey.size() <= 20 &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidVisitorStatistics(data) {
+      return data.keys().hasAll(['dayKey', 'weekKey', 'monthKey', 'todayCount', 'weekCount', 'monthCount', 'totalCount', 'lastSessionId', 'updatedAt']) &&
+        data.keys().hasOnly(['dayKey', 'weekKey', 'monthKey', 'todayCount', 'weekCount', 'monthCount', 'totalCount', 'lastSessionId', 'updatedAt']) &&
+        data.dayKey is string && data.dayKey.size() >= 8 && data.dayKey.size() <= 20 &&
+        data.weekKey is string && data.weekKey.size() >= 6 && data.weekKey.size() <= 20 &&
+        data.monthKey is string && data.monthKey.size() >= 6 && data.monthKey.size() <= 20 &&
+        data.todayCount is number && data.todayCount >= 0 &&
+        data.weekCount is number && data.weekCount >= 0 &&
+        data.monthCount is number && data.monthCount >= 0 &&
+        data.totalCount is number && data.totalCount >= 0 &&
+        data.lastSessionId is string && data.lastSessionId.size() >= 3 && data.lastSessionId.size() <= 160 &&
+        data.updatedAt is timestamp;
+    }
+
+    // --- Connectivity Probe ---
+    match /test/{docId} {
+      allow get: if docId == 'connection';
+      allow list, write: if false;
+    }
+
+    // --- Collection Rules ---
+    match /admins/{adminId} {
+      allow get: if isSignedIn() && isValidId(adminId) && (request.auth.uid == adminId || isAdmin());
+      allow list: if isBootstrappedAdmin();
+      allow create: if isAdmin() && isValidId(adminId) && isValidAdminRecord(incoming()) && incoming().uid == adminId && incoming().createdAt == request.time;
+      allow update: if isAdmin() && isValidId(adminId) && isValidAdminRecord(incoming()) && incoming().uid == existing().uid && incoming().createdAt == existing().createdAt;
+      allow delete: if isAdmin() && isValidId(adminId);
+    }
+
+    match /users/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && (request.auth.uid == userId || isAdmin());
+      allow list: if isBootstrappedAdmin();
+      allow create: if isVerifiedUser() && isValidId(userId) && request.auth.uid == userId &&
+        isValidUserProfile(incoming()) &&
+        incoming().uid == userId &&
+        incoming().email == request.auth.token.email &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser() && isValidId(userId) && isValidUserProfile(incoming()) &&
+        incoming().uid == existing().uid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (
+          isAdmin() ||
+          (
+            request.auth.uid == userId &&
+            incoming().email == existing().email &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['name', 'telegram', 'youtubeVerified', 'updatedAt'])
+          )
+        );
+      allow delete: if isAdmin() && isValidId(userId);
+    }
+
+    match /vipGrants/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && (request.auth.uid == userId || isAdmin());
+      allow list: if isBootstrappedAdmin();
+      allow create: if isAdmin() && isValidId(userId) && isValidVipGrant(incoming()) &&
+        incoming().userId == userId &&
+        incoming().updatedAt == request.time;
+      allow update: if isAdmin() && isValidId(userId) && isValidVipGrant(incoming()) &&
+        incoming().userId == existing().userId &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['vipStatus', 'vipType', 'approvalStatus', 'vipExpiry', 'updatedAt']);
+      allow delete: if isAdmin() && isValidId(userId);
+    }
+
+    match /vipSignalsPublic/{signalId} {
+      allow get: if isValidId(signalId) && (resource == null || existing().currency == 'XAUUSD' || isAdmin());
+      allow list: if resource.data.currency == 'XAUUSD' || isBootstrappedAdmin();
+      allow create: if isAdmin() && isValidId(signalId) && isValidVipSignalPublic(incoming()) &&
+        incoming().id == signalId &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isAdmin() && isValidId(signalId) && isValidVipSignalPublic(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['date', 'direction', 'orderType', 'result', 'pips', 'updatedAt']);
+      allow delete: if isAdmin() && isValidId(signalId);
+    }
+
+    match /vipSignalsPrivate/{signalId} {
+      allow get: if isSignedIn() && isValidId(signalId) && (isAdmin() || isActiveVip());
+      allow list: if isBootstrappedAdmin();
+      allow create: if isAdmin() && isValidId(signalId) && isValidVipSignalPrivate(incoming()) &&
+        incoming().id == signalId &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        existsAfter(/databases/$(database)/documents/vipSignalsPublic/$(signalId));
+      allow update: if isAdmin() && isValidId(signalId) && isValidVipSignalPrivate(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['entry', 'tp', 'extraTp', 'sl', 'note', 'updatedAt']);
+      allow delete: if isAdmin() && isValidId(signalId);
+    }
+
+    match /vipRequests/{requestId} {
+      allow get: if isSignedIn() && isValidId(requestId) && ((resource != null && existing().userId == request.auth.uid) || isAdmin());
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isBootstrappedAdmin());
+      allow create: if isVerifiedUser() && isValidId(requestId) && isValidVipRequest(incoming()) &&
+        incoming().id == requestId &&
+        incoming().userId == request.auth.uid &&
+        incoming().email == request.auth.token.email &&
+        incoming().status == 'PENDING' &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid));
+      allow update: if isSignedIn() && isValidId(requestId) && isValidVipRequest(incoming()) &&
+        (existing().status == 'PENDING' || isAdmin()) &&
+        isAdmin() &&
+        incoming().id == existing().id &&
+        incoming().userId == existing().userId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']);
+      allow delete: if isAdmin() && isValidId(requestId);
+    }
+
+    match /videos/{videoId} {
+      allow get: if isValidId(videoId) && ((resource != null && existing().status == 'ACTIVE') || isAdmin());
+      allow list: if resource.data.status == 'ACTIVE' || isBootstrappedAdmin();
+      allow create: if isAdmin() && isValidId(videoId) && isValidAcademyVideo(incoming()) &&
+        incoming().id == videoId &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isAdmin() && isValidId(videoId) && isValidAcademyVideo(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['title', 'youtubeUrl', 'thumbnail', 'description', 'date', 'status', 'updatedAt']);
+      allow delete: if isAdmin() && isValidId(videoId);
+    }
+
+    match /freeBooks/{bookId} {
+      allow get: if isValidId(bookId) && ((resource != null && existing().status == 'ACTIVE') || isAdmin());
+      allow list: if resource.data.status == 'ACTIVE' || isBootstrappedAdmin();
+      allow create: if isAdmin() && isValidId(bookId) && isValidFreeBook(incoming()) &&
+        incoming().id == bookId &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser() && isValidId(bookId) && isValidFreeBook(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (
+          isAdmin() ||
+          (
+            existing().status == 'ACTIVE' &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['views', 'updatedAt']) &&
+            incoming().views == existing().views + 1
+          ) ||
+          (
+            existing().status == 'ACTIVE' &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['downloads', 'updatedAt']) &&
+            incoming().downloads == existing().downloads + 1
+          )
+        );
+      allow delete: if isAdmin() && isValidId(bookId);
+    }
+
+    match /paidBooksPublic/{bookId} {
+      allow get: if isValidId(bookId) && ((resource != null && existing().status == 'ACTIVE') || isAdmin());
+      allow list: if resource.data.status == 'ACTIVE' || isBootstrappedAdmin();
+      allow create: if isAdmin() && isValidId(bookId) && isValidPaidBookPublic(incoming()) &&
+        incoming().id == bookId &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isAdmin() && isValidId(bookId) && isValidPaidBookPublic(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['name', 'description', 'coverUrl', 'price', 'status', 'updatedAt']);
+      allow delete: if isAdmin() && isValidId(bookId);
+    }
+
+    match /paidBooksProtected/{bookId} {
+      allow get: if isSignedIn() && isValidId(bookId) && (
+        isAdmin() ||
+        (
+          isVerifiedUser() &&
+          exists(/databases/$(database)/documents/bookAccess/$(request.auth.uid + '_' + bookId)) &&
+          get(/databases/$(database)/documents/bookAccess/$(request.auth.uid + '_' + bookId)).data.status == 'APPROVED'
+        )
+      );
+      allow list: if false;
+      allow create: if isAdmin() && isValidId(bookId) && isValidPaidBookProtected(incoming()) &&
+        incoming().id == bookId &&
+        incoming().updatedAt == request.time &&
+        existsAfter(/databases/$(database)/documents/paidBooksPublic/$(bookId));
+      allow update: if isAdmin() && isValidId(bookId) && isValidPaidBookProtected(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['pdfUrl', 'updatedAt']);
+      allow delete: if isAdmin() && isValidId(bookId);
+    }
+
+    match /bookPurchases/{purchaseId} {
+      allow get: if isSignedIn() && isValidId(purchaseId) && ((resource != null && existing().userId == request.auth.uid) || isAdmin());
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isBootstrappedAdmin());
+      allow create: if isVerifiedUser() && isValidId(purchaseId) && isValidBookPurchase(incoming()) &&
+        incoming().id == purchaseId &&
+        incoming().userId == request.auth.uid &&
+        incoming().userEmail == request.auth.token.email &&
+        incoming().status == 'PENDING' &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        exists(/databases/$(database)/documents/paidBooksPublic/$(incoming().bookId));
+      allow update: if isSignedIn() && isValidId(purchaseId) && isValidBookPurchase(incoming()) &&
+        (existing().status == 'PENDING' || isAdmin()) &&
+        isAdmin() &&
+        incoming().id == existing().id &&
+        incoming().userId == existing().userId &&
+        incoming().bookId == existing().bookId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']);
+      allow delete: if isAdmin() && isValidId(purchaseId);
+    }
+
+    match /bookAccess/{accessId} {
+      allow get: if isSignedIn() && isValidLongId(accessId) && (
+        isAdmin() ||
+        (
+          accessId.matches('^' + request.auth.uid + '_[a-zA-Z0-9_\\-]+$') &&
+          (resource == null || existing().userId == request.auth.uid)
+        )
+      );
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isBootstrappedAdmin());
+      allow create: if isAdmin() && isValidLongId(accessId) && isValidBookAccess(incoming()) &&
+        incoming().id == accessId &&
+        accessId == incoming().userId + '_' + incoming().bookId &&
+        incoming().updatedAt == request.time;
+      allow update: if isAdmin() && isValidLongId(accessId) && isValidBookAccess(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().userId == existing().userId &&
+        incoming().bookId == existing().bookId &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']);
+      allow delete: if isAdmin() && isValidLongId(accessId);
+    }
+
+    match /notifications/{notifId} {
+      allow get: if isValidId(notifId) && (
+        (resource != null && existing().active == true && (existing().targetUid == 'ALL' || (isSignedIn() && existing().targetUid == request.auth.uid))) ||
+        isAdmin()
+      );
+      allow list: if (resource.data.active == true && resource.data.targetUid == 'ALL') ||
+        (isSignedIn() && resource.data.targetUid == request.auth.uid) ||
+        isBootstrappedAdmin();
+      allow create: if isAdmin() && isValidId(notifId) && isValidAppNotification(incoming()) &&
+        incoming().id == notifId &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isAdmin() && isValidId(notifId) && isValidAppNotification(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['targetUid', 'title', 'message', 'icon', 'buttonText', 'buttonUrl', 'active', 'updatedAt']);
+      allow delete: if isAdmin() && isValidId(notifId);
+    }
+
+    match /settings/{settingId} {
+      allow get: if settingId == 'config';
+      allow list: if false;
+      allow create: if isAdmin() && settingId == 'config' && isValidSettings(incoming()) &&
+        incoming().updatedAt == request.time;
+      allow update: if isAdmin() && settingId == 'config' && isValidSettings(incoming()) &&
+        incoming().updatedAt == request.time;
+      allow delete: if false;
+    }
+
+    match /visitorSessions/{sessionId} {
+      allow get: if isSignedIn() && isValidLongId(sessionId) && (
+        isAdmin() ||
+        (
+          sessionId.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}_' + request.auth.uid + '$') &&
+          (resource == null || existing().uid == request.auth.uid)
+        )
+      );
+      allow list: if isBootstrappedAdmin();
+      allow create: if isVerifiedUser() && isValidLongId(sessionId) && isValidVisitorSession(incoming()) &&
+        incoming().sessionId == sessionId &&
+        incoming().uid == request.auth.uid &&
+        sessionId == incoming().dayKey + '_' + request.auth.uid &&
+        incoming().createdAt == request.time &&
+        !exists(/databases/$(database)/documents/visitorSessions/$(sessionId));
+      allow update, delete: if isAdmin() && isValidLongId(sessionId);
+    }
+
+    match /statistics/{statId} {
+      allow get: if statId == 'visitors';
+      allow list: if false;
+      allow create: if statId == 'visitors' && isValidVisitorStatistics(incoming()) &&
+        incoming().updatedAt == request.time &&
+        (
+          isAdmin() ||
+          (
+            isVerifiedUser() &&
+            incoming().todayCount == 1 &&
+            incoming().weekCount == 1 &&
+            incoming().monthCount == 1 &&
+            incoming().totalCount == 1 &&
+            incoming().lastSessionId == incoming().dayKey + '_' + request.auth.uid &&
+            !exists(/databases/$(database)/documents/visitorSessions/$(incoming().lastSessionId)) &&
+            existsAfter(/databases/$(database)/documents/visitorSessions/$(incoming().lastSessionId))
+          )
+        );
+      allow update: if statId == 'visitors' && isValidVisitorStatistics(incoming()) &&
+        incoming().updatedAt == request.time &&
+        (
+          isAdmin() ||
+          (
+            isVerifiedUser() &&
+            incoming().lastSessionId == incoming().dayKey + '_' + request.auth.uid &&
+            incoming().totalCount == existing().totalCount + 1 &&
+            (incoming().dayKey == existing().dayKey ? incoming().todayCount == existing().todayCount + 1 : incoming().todayCount == 1) &&
+            (incoming().weekKey == existing().weekKey ? incoming().weekCount == existing().weekCount + 1 : incoming().weekCount == 1) &&
+            (incoming().monthKey == existing().monthKey ? incoming().monthCount == existing().monthCount + 1 : incoming().monthCount == 1) &&
+            !exists(/databases/$(database)/documents/visitorSessions/$(incoming().lastSessionId)) &&
+            existsAfter(/databases/$(database)/documents/visitorSessions/$(incoming().lastSessionId))
+          )
+        );
+      allow delete: if false;
+    }
+  }
+}

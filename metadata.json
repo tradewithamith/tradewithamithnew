@@ -1,0 +1,6 @@
+{
+  "name": "Trade With Amith — MSNR Academy",
+  "description": "Premium Malaysian Support & Resistance (MSNR) trading academy, XAUUSD Gold VIP signals terminal, educational video library, and digital bookstore.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
