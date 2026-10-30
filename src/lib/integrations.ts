@@ -15,11 +15,28 @@ export type YoutubeCheckResult =
 
 export function normalizeYoutubeChannelId(raw: string): string {
   const trimmed = (raw || '').trim();
-  const match = trimmed.match(/youtube\.com\/channel\/([a-zA-Z0-9_-]+)/i);
-  if (match?.[1]) {
-    return match[1];
+  const urlMatch = trimmed.match(/youtube\.com\/channel\/(UC[a-zA-Z0-9_-]{15,})/i);
+  if (urlMatch?.[1]) {
+    return urlMatch[1];
   }
-  return trimmed;
+  const directMatch = trimmed.match(/^(UC[a-zA-Z0-9_-]{15,})$/);
+  if (directMatch?.[1]) {
+    return directMatch[1];
+  }
+  return '';
+}
+
+export function sanitizeSubscriberCount(raw: string | null | undefined): string {
+  const cleaned = String(raw || '')
+    .replace(/subscribers?/gi, '')
+    .trim();
+  if (!cleaned || cleaned.includes('@')) {
+    return '';
+  }
+  if (/^\d[\d,.\s]*[KMBkmb]?$/.test(cleaned)) {
+    return cleaned.replace(/\s+/g, '').toUpperCase();
+  }
+  return '';
 }
 
 export function normalizeTelegramUrl(raw: string): string {
@@ -105,22 +122,24 @@ export async function verifyYoutubeSubscription(
 }
 
 /**
- * Retrieves YouTube subscriber count via server proxy or authenticated token,
- * falling back gracefully to last synchronized count.
+ * Retrieves live YouTube subscriber count via authenticated token, YouTube API key,
+ * server/Cloudflare proxy, or public static-host reader — strictly rejecting non-numeric strings.
  */
 export async function fetchYoutubeSubscriberCount(
   channelId: string,
-  fallbackCount: string
+  fallbackCount: string,
+  channelUrl?: string
 ): Promise<string> {
-  const localCacheKey = 'msnr_live_yt_subs_v3';
-  const cleanId = normalizeYoutubeChannelId(channelId);
-  if (!cleanId) {
-    return localStorage.getItem(localCacheKey) || fallbackCount;
-  }
+  const localCacheKey = 'msnr_live_yt_subs_v4';
+  const cleanId = normalizeYoutubeChannelId(channelId) || 'UCKwo4dtX8sFrJcW5I5tZ0cw';
+  const handleMatch = (channelUrl || '').match(/@([a-zA-Z0-9_.-]+)/);
+  const handle = handleMatch ? `@${handleMatch[1]}` : '@tradewithamithYT';
+  const safeFallback = sanitizeSubscriberCount(fallbackCount);
+  const safeCached = sanitizeSubscriberCount(localStorage.getItem(localCacheKey));
 
-  // Try authenticated YouTube Data API v3 if token is in memory
+  // 1. Try authenticated YouTube Data API v3 if Google OAuth token is in memory
   const token = getAccessToken();
-  if (token) {
+  if (token && cleanId) {
     try {
       const res = await fetch(
         `https://www.googleapis.com/youtube/v3/channels?part=statistics&id=${encodeURIComponent(cleanId)}`,
@@ -132,31 +151,83 @@ export async function fetchYoutubeSubscriberCount(
         };
         const raw = json.items?.[0]?.statistics?.subscriberCount;
         if (raw) {
-          const formatted = Number(raw).toLocaleString();
-          localStorage.setItem(localCacheKey, formatted);
-          return formatted;
+          const formatted = sanitizeSubscriberCount(Number(raw).toLocaleString('en-US'));
+          if (formatted) {
+            localStorage.setItem(localCacheKey, formatted);
+            return formatted;
+          }
         }
       }
     } catch {
-      // Fall through to server proxy
+      // Continue to next source
     }
   }
 
-  // Try server-side proxy
+  // 2. Try client-side YouTube Data API key if configured via VITE_YOUTUBE_API_KEY
+  const publicApiKey = (import.meta.env.VITE_YOUTUBE_API_KEY as string | undefined) || '';
+  if (publicApiKey && cleanId) {
+    try {
+      const res = await fetch(
+        `https://www.googleapis.com/youtube/v3/channels?part=statistics&id=${encodeURIComponent(cleanId)}&key=${encodeURIComponent(publicApiKey)}`
+      );
+      if (res.ok) {
+        const json = (await res.json()) as {
+          items?: Array<{ statistics?: { subscriberCount?: string } }>;
+        };
+        const raw = json.items?.[0]?.statistics?.subscriberCount;
+        if (raw) {
+          const formatted = sanitizeSubscriberCount(Number(raw).toLocaleString('en-US'));
+          if (formatted) {
+            localStorage.setItem(localCacheKey, formatted);
+            return formatted;
+          }
+        }
+      }
+    } catch {
+      // Continue to server/edge endpoint
+    }
+  }
+
+  // 3. Try server-side / Cloudflare Pages Function endpoint
   try {
-    const res = await fetch(`/api/youtube/channel-stats?channelId=${encodeURIComponent(cleanId)}`);
+    const res = await fetch(
+      `/api/youtube/channel-stats?channelId=${encodeURIComponent(cleanId)}&handle=${encodeURIComponent(handle)}`
+    );
     if (res.ok) {
-      const data = (await res.json()) as { subscriberCount?: string | null };
-      if (data.subscriberCount) {
-        localStorage.setItem(localCacheKey, data.subscriberCount);
-        return data.subscriberCount;
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        const data = (await res.json()) as { subscriberCount?: string | null };
+        const cleanCount = sanitizeSubscriberCount(data.subscriberCount);
+        if (cleanCount) {
+          localStorage.setItem(localCacheKey, cleanCount);
+          return cleanCount;
+        }
       }
     }
   } catch {
-    // Static Firebase Hosting fallback
+    // Fall through to pure static-host fallback
   }
 
-  return localStorage.getItem(localCacheKey) || fallbackCount;
+  // 4. Pure static-host fallback (e.g. GitHub Pages without /api backend)
+  try {
+    const ytTarget = `https://www.youtube.com/channel/${encodeURIComponent(cleanId)}`;
+    const staticProxyRes = await fetch(
+      `https://api.allorigins.win/raw?url=${encodeURIComponent(ytTarget)}`
+    );
+    if (staticProxyRes.ok) {
+      const html = await staticProxyRes.text();
+      const subMatch = html.match(/([0-9][0-9.,]*\s*[KMB]?)\s+subscribers/i);
+      const cleanCount = sanitizeSubscriberCount(subMatch?.[1]);
+      if (cleanCount) {
+        localStorage.setItem(localCacheKey, cleanCount);
+        return cleanCount;
+      }
+    }
+  } catch {
+    // Ignore network / CORS reader limits
+  }
+
+  return safeCached || safeFallback;
 }
 
 /**

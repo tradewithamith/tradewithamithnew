@@ -206,15 +206,13 @@ export const HomeWindow: React.FC<HomeWindowProps> = ({
           className="apple-surface rounded-2xl p-5 space-y-1.5 hover:border-[#D4AF37]/45 transition-colors group block"
         >
           <div className="flex items-center justify-between gap-2">
-            <p className="text-xs font-medium text-[#A1A1AA]">YouTube Academy</p>
+            <p className="text-xs font-medium text-[#A1A1AA]">Students</p>
             <ExternalLink className="w-3.5 h-3.5 text-[#8E8E93] group-hover:text-[#D4AF37] transition-colors" />
           </div>
-          <p className="text-xl sm:text-2xl font-semibold font-mono tabular-nums text-[#F5F5F7] truncate">
-            {subscriberCount || '@tradewithamithYT'}
+          <p className="text-2xl sm:text-3xl font-semibold font-mono tabular-nums text-[#F5F5F7] truncate">
+            {subscriberCount || '—'}
           </p>
-          <p className="text-xs text-[#8E8E93]">
-            {subscriberCount ? 'Live Channel Subscribers' : 'Official YouTube Channel'}
-          </p>
+          <p className="text-xs text-[#8E8E93]">Live YouTube Subscribers</p>
         </a>
 
         <div className="apple-surface rounded-2xl p-5 space-y-1.5">

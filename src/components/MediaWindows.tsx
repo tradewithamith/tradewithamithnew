@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Check,
   Copy,
@@ -27,6 +27,12 @@ import {
   type PaidBookPublic,
   type VideoReactionType,
 } from '../types/academy';
+import {
+  MEDIA_PAGE_SIZE,
+  paginateItems,
+  PaginationControls,
+  scrollNearestContainerToTop,
+} from './PaginationControls';
 import { BinanceQrDisplay, ResilientImage } from './ResilientImage';
 
 interface PdfCoverThumbnailProps {
@@ -100,13 +106,21 @@ export const MarketAnalysisWindow: React.FC = () => {
   } = useAcademy();
   const [selectedVideo, setSelectedVideo] = useState<MarketAnalysisVideo | null>(null);
   const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
   const [busyReactionKey, setBusyReactionKey] = useState<string | null>(null);
   const [reactionNotice, setReactionNotice] = useState<string | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
 
   const filtered = marketAnalysisVideos.filter(
     (v) =>
       v.title.toLowerCase().includes(search.toLowerCase()) ||
       v.description.toLowerCase().includes(search.toLowerCase())
+  );
+
+  const { pageItems: paginatedMarketVideos, safePage } = paginateItems(
+    filtered,
+    page,
+    MEDIA_PAGE_SIZE
   );
 
   const embedUrl = selectedVideo ? extractYoutubeEmbedUrl(selectedVideo.youtubeUrl) : null;
@@ -198,7 +212,7 @@ export const MarketAnalysisWindow: React.FC = () => {
   };
 
   return (
-    <div className="p-3.5 sm:p-8 space-y-5 sm:space-y-7">
+    <div ref={containerRef} className="p-3.5 sm:p-8 space-y-5 sm:space-y-7">
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
         <div className="space-y-1">
           <p className="text-xs font-medium text-[#D4AF37]">
@@ -212,7 +226,10 @@ export const MarketAnalysisWindow: React.FC = () => {
         <input
           type="search"
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => {
+            setSearch(e.target.value);
+            setPage(1);
+          }}
           placeholder="Search market analysis..."
           aria-label="Search market analysis videos"
           className="w-full sm:w-64 px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/[0.09] text-sm text-[#F5F5F7] placeholder:text-[#8E8E93] focus:outline-none focus:border-[#D4AF37]"
@@ -247,64 +264,77 @@ export const MarketAnalysisWindow: React.FC = () => {
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-5">
-          {filtered.map((video) => {
-            const thumbSrc =
-              video.thumbnail || extractYoutubeThumbnail(video.youtubeUrl, ASSETS.heroTerminal);
-            return (
-              <article
-                key={video.id}
-                className="apple-surface rounded-xl sm:rounded-2xl overflow-hidden flex flex-col justify-between group"
-              >
-                <div>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedVideo(video)}
-                    className="relative w-full aspect-video overflow-hidden bg-[#0E0F14] block text-left"
-                    aria-label={`Play ${video.title}`}
-                  >
-                    <ResilientImage
-                      src={thumbSrc}
-                      alt={video.title}
-                      fallbackLabel={video.title}
-                      className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-200"
-                    />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/15 to-transparent flex items-center justify-center">
-                      <span className="w-10 h-10 rounded-full bg-black/60 border border-white/20 flex items-center justify-center text-[#F5F5F7] group-hover:bg-[#D4AF37] group-hover:text-[#09090B] group-hover:border-[#D4AF37] transition-colors">
-                        <Play className="w-4 h-4 fill-current ml-0.5" />
-                      </span>
+        <div className="space-y-6">
+          <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-5">
+            {paginatedMarketVideos.map((video) => {
+              const thumbSrc =
+                video.thumbnail || extractYoutubeThumbnail(video.youtubeUrl, ASSETS.heroTerminal);
+              return (
+                <article
+                  key={video.id}
+                  className="apple-surface rounded-xl sm:rounded-2xl overflow-hidden flex flex-col justify-between group"
+                >
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedVideo(video)}
+                      className="relative w-full aspect-video overflow-hidden bg-[#0E0F14] block text-left"
+                      aria-label={`Play ${video.title}`}
+                    >
+                      <ResilientImage
+                        src={thumbSrc}
+                        alt={video.title}
+                        fallbackLabel={video.title}
+                        className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-200"
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/15 to-transparent flex items-center justify-center">
+                        <span className="w-10 h-10 rounded-full bg-black/60 border border-white/20 flex items-center justify-center text-[#F5F5F7] group-hover:bg-[#D4AF37] group-hover:text-[#09090B] group-hover:border-[#D4AF37] transition-colors">
+                          <Play className="w-4 h-4 fill-current ml-0.5" />
+                        </span>
+                      </div>
+                    </button>
+                    <div className="p-3 sm:p-5 space-y-1.5 sm:space-y-2">
+                      <p className="text-[10px] sm:text-xs text-[#8E8E93] font-mono tabular-nums">
+                        {video.date}
+                      </p>
+                      <h3 className="text-xs sm:text-base font-semibold text-[#F5F5F7] leading-snug line-clamp-2">
+                        {video.title}
+                      </h3>
+                      <p className="text-[11px] sm:text-sm text-[#A1A1AA] line-clamp-2 sm:line-clamp-3 leading-relaxed">
+                        {video.description}
+                      </p>
                     </div>
-                  </button>
-                  <div className="p-3 sm:p-5 space-y-1.5 sm:space-y-2">
-                    <p className="text-[10px] sm:text-xs text-[#8E8E93] font-mono tabular-nums">
-                      {video.date}
-                    </p>
-                    <h3 className="text-xs sm:text-base font-semibold text-[#F5F5F7] leading-snug line-clamp-2">
-                      {video.title}
-                    </h3>
-                    <p className="text-[11px] sm:text-sm text-[#A1A1AA] line-clamp-2 sm:line-clamp-3 leading-relaxed">
-                      {video.description}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="px-3 pb-3 sm:px-5 sm:pb-5 space-y-2.5">
-                  <div className="flex items-center justify-between gap-2 flex-wrap">
-                    {renderReactionPill(video.id, 'card')}
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={() => setSelectedVideo(video)}
-                    className="w-full py-2 sm:py-2.5 px-2.5 sm:px-4 rounded-lg sm:rounded-xl bg-white/[0.07] hover:bg-[#D4AF37] text-[#F5F5F7] hover:text-[#09090B] text-[11px] sm:text-xs font-semibold transition-colors inline-flex items-center justify-center gap-1.5 sm:gap-2"
-                  >
-                    <Play className="w-3 h-3 sm:w-3.5 sm:h-3.5 fill-current shrink-0" />
-                    <span className="truncate">Watch Analysis</span>
-                  </button>
-                </div>
-              </article>
-            );
-          })}
+                  <div className="px-3 pb-3 sm:px-5 sm:pb-5 space-y-2.5">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      {renderReactionPill(video.id, 'card')}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setSelectedVideo(video)}
+                      className="w-full py-2 sm:py-2.5 px-2.5 sm:px-4 rounded-lg sm:rounded-xl bg-white/[0.07] hover:bg-[#D4AF37] text-[#F5F5F7] hover:text-[#09090B] text-[11px] sm:text-xs font-semibold transition-colors inline-flex items-center justify-center gap-1.5 sm:gap-2"
+                    >
+                      <Play className="w-3 h-3 sm:w-3.5 sm:h-3.5 fill-current shrink-0" />
+                      <span className="truncate">Watch Analysis</span>
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+
+          <PaginationControls
+            currentPage={safePage}
+            totalItems={filtered.length}
+            pageSize={MEDIA_PAGE_SIZE}
+            itemLabel={filtered.length === 1 ? 'video' : 'videos'}
+            onPageChange={(nextPage) => {
+              setPage(nextPage);
+              scrollNearestContainerToTop(containerRef.current);
+            }}
+          />
         </div>
       )}
 
@@ -384,6 +414,8 @@ export const VideosWindow: React.FC = () => {
   const { videos } = useAcademy();
   const [selectedVideo, setSelectedVideo] = useState<AcademyVideo | null>(null);
   const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const containerRef = useRef<HTMLDivElement | null>(null);
 
   const filtered = videos.filter(
     (v) =>
@@ -391,10 +423,16 @@ export const VideosWindow: React.FC = () => {
       v.description.toLowerCase().includes(search.toLowerCase())
   );
 
+  const { pageItems: paginatedVideos, safePage } = paginateItems(
+    filtered,
+    page,
+    MEDIA_PAGE_SIZE
+  );
+
   const embedUrl = selectedVideo ? extractYoutubeEmbedUrl(selectedVideo.youtubeUrl) : null;
 
   return (
-    <div className="p-3.5 sm:p-8 space-y-5 sm:space-y-7">
+    <div ref={containerRef} className="p-3.5 sm:p-8 space-y-5 sm:space-y-7">
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
         <div className="space-y-1">
           <p className="text-xs font-medium text-[#D4AF37]">
@@ -408,7 +446,10 @@ export const VideosWindow: React.FC = () => {
         <input
           type="search"
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => {
+            setSearch(e.target.value);
+            setPage(1);
+          }}
           placeholder="Search MSNR lessons..."
           aria-label="Search video lessons"
           className="w-full sm:w-64 px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/[0.09] text-sm text-[#F5F5F7] placeholder:text-[#8E8E93] focus:outline-none focus:border-[#D4AF37]"
@@ -427,51 +468,64 @@ export const VideosWindow: React.FC = () => {
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-5">
-          {filtered.map((video) => {
-            const thumbSrc =
-              video.thumbnail || extractYoutubeThumbnail(video.youtubeUrl, ASSETS.videoThumb);
-            return (
-              <article
-                key={video.id}
-                className="apple-surface rounded-xl sm:rounded-2xl overflow-hidden flex flex-col justify-between group"
-              >
-                <div>
-                  <div className="relative aspect-video overflow-hidden bg-[#0E0F14]">
-                    <ResilientImage
-                      src={thumbSrc}
-                      alt={video.title}
-                      fallbackLabel={video.title}
-                      className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-200"
-                    />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/15 to-transparent" />
+        <div className="space-y-6">
+          <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-5">
+            {paginatedVideos.map((video) => {
+              const thumbSrc =
+                video.thumbnail || extractYoutubeThumbnail(video.youtubeUrl, ASSETS.videoThumb);
+              return (
+                <article
+                  key={video.id}
+                  className="apple-surface rounded-xl sm:rounded-2xl overflow-hidden flex flex-col justify-between group"
+                >
+                  <div>
+                    <div className="relative aspect-video overflow-hidden bg-[#0E0F14]">
+                      <ResilientImage
+                        src={thumbSrc}
+                        alt={video.title}
+                        fallbackLabel={video.title}
+                        className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-200"
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/15 to-transparent" />
+                    </div>
+                    <div className="p-3 sm:p-5 space-y-1.5 sm:space-y-2">
+                      <p className="text-[10px] sm:text-xs text-[#8E8E93] font-mono tabular-nums">
+                        {video.date}
+                      </p>
+                      <h3 className="text-xs sm:text-base font-semibold text-[#F5F5F7] leading-snug line-clamp-2">
+                        {video.title}
+                      </h3>
+                      <p className="text-[11px] sm:text-sm text-[#A1A1AA] line-clamp-2 sm:line-clamp-3 leading-relaxed">
+                        {video.description}
+                      </p>
+                    </div>
                   </div>
-                  <div className="p-3 sm:p-5 space-y-1.5 sm:space-y-2">
-                    <p className="text-[10px] sm:text-xs text-[#8E8E93] font-mono tabular-nums">
-                      {video.date}
-                    </p>
-                    <h3 className="text-xs sm:text-base font-semibold text-[#F5F5F7] leading-snug line-clamp-2">
-                      {video.title}
-                    </h3>
-                    <p className="text-[11px] sm:text-sm text-[#A1A1AA] line-clamp-2 sm:line-clamp-3 leading-relaxed">
-                      {video.description}
-                    </p>
-                  </div>
-                </div>
 
-                <div className="px-3 pb-3 sm:px-5 sm:pb-5">
-                  <button
-                    type="button"
-                    onClick={() => setSelectedVideo(video)}
-                    className="w-full py-2 sm:py-2.5 px-2.5 sm:px-4 rounded-lg sm:rounded-xl bg-white/[0.07] hover:bg-[#D4AF37] text-[#F5F5F7] hover:text-[#09090B] text-[11px] sm:text-xs font-semibold transition-colors inline-flex items-center justify-center gap-1.5 sm:gap-2"
-                  >
-                    <Play className="w-3 h-3 sm:w-3.5 sm:h-3.5 fill-current shrink-0" />
-                    <span className="truncate">Watch Lesson</span>
-                  </button>
-                </div>
-              </article>
-            );
-          })}
+                  <div className="px-3 pb-3 sm:px-5 sm:pb-5">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedVideo(video)}
+                      className="w-full py-2 sm:py-2.5 px-2.5 sm:px-4 rounded-lg sm:rounded-xl bg-white/[0.07] hover:bg-[#D4AF37] text-[#F5F5F7] hover:text-[#09090B] text-[11px] sm:text-xs font-semibold transition-colors inline-flex items-center justify-center gap-1.5 sm:gap-2"
+                    >
+                      <Play className="w-3 h-3 sm:w-3.5 sm:h-3.5 fill-current shrink-0" />
+                      <span className="truncate">Watch Lesson</span>
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+
+          <PaginationControls
+            currentPage={safePage}
+            totalItems={filtered.length}
+            pageSize={MEDIA_PAGE_SIZE}
+            itemLabel={filtered.length === 1 ? 'video' : 'videos'}
+            onPageChange={(nextPage) => {
+              setPage(nextPage);
+              scrollNearestContainerToTop(containerRef.current);
+            }}
+          />
         </div>
       )}
 
@@ -536,6 +590,14 @@ export const FreePdfsWindow: React.FC = () => {
   const { freeBooks, incrementFreeBookMetric } = useAcademy();
   const [localMetrics, setLocalMetrics] = useState<Record<string, { v: number; d: number }>>({});
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  const { pageItems: paginatedFreeBooks, safePage } = paginateItems(
+    freeBooks,
+    page,
+    MEDIA_PAGE_SIZE
+  );
 
   const handleDownload = async (book: FreeBook) => {
     if (downloadingId === book.id) return;
@@ -567,7 +629,7 @@ export const FreePdfsWindow: React.FC = () => {
   };
 
   return (
-    <div className="p-3.5 sm:p-8 space-y-5 sm:space-y-7">
+    <div ref={containerRef} className="p-3.5 sm:p-8 space-y-5 sm:space-y-7">
       <div className="space-y-1">
         <p className="text-xs font-medium text-[#D4AF37]">
           Open-Access Study Material · Automatic Cover &amp; Direct Download
@@ -585,81 +647,94 @@ export const FreePdfsWindow: React.FC = () => {
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-2 gap-3 sm:gap-6">
-          {freeBooks.map((book) => {
-          const extra = localMetrics[book.id] || { v: 0, d: 0 };
-          const views = book.views + extra.v;
-          const downloads = book.downloads + extra.d;
-          const isDownloading = downloadingId === book.id;
+        <div className="space-y-6">
+          <div className="grid grid-cols-2 gap-3 sm:gap-6">
+            {paginatedFreeBooks.map((book) => {
+              const extra = localMetrics[book.id] || { v: 0, d: 0 };
+              const views = book.views + extra.v;
+              const downloads = book.downloads + extra.d;
+              const isDownloading = downloadingId === book.id;
 
-          return (
-            <article
-              key={book.id}
-              onMouseEnter={() => {
-                if (!localMetrics[book.id]) {
-                  handlePreviewCount(book);
-                }
-              }}
-              className="apple-surface rounded-xl sm:rounded-2xl p-3 sm:p-5 flex flex-col lg:flex-row gap-3 sm:gap-5 items-stretch"
-            >
-              <div className="w-full lg:w-36 aspect-[3/4] rounded-lg sm:rounded-xl overflow-hidden shrink-0 border border-white/10">
-                <PdfCoverThumbnail
-                  coverUrl={book.coverUrl}
-                  pdfUrl={book.pdfUrl}
-                  alt={book.name}
-                  fallbackAsset={ASSETS.bookMsnr}
-                />
-              </div>
-
-              <div className="flex-1 flex flex-col justify-between space-y-2.5 sm:space-y-4">
-                <div className="space-y-1.5 sm:space-y-2">
-                  <h3 className="text-xs sm:text-lg font-semibold text-[#F5F5F7] leading-snug line-clamp-2">
-                    {book.name}
-                  </h3>
-                  <p className="text-[11px] sm:text-sm text-[#A1A1AA] leading-relaxed line-clamp-2 sm:line-clamp-3">
-                    {book.description}
-                  </p>
-                </div>
-
-                <div className="space-y-2 sm:space-y-3 pt-1 sm:pt-2">
-                  <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 sm:gap-4 text-[10px] sm:text-xs text-[#8E8E93] font-mono tabular-nums">
-                    <span className="inline-flex items-center gap-1 sm:gap-1.5">
-                      <Eye className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0" />
-                      <span>
-                        {views.toLocaleString()}
-                        <span className="hidden sm:inline"> Views</span>
-                      </span>
-                    </span>
-                    <span aria-hidden="true">·</span>
-                    <span className="inline-flex items-center gap-1 sm:gap-1.5">
-                      <Download className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0" />
-                      <span>
-                        {downloads.toLocaleString()}
-                        <span className="hidden sm:inline"> Downloads</span>
-                      </span>
-                    </span>
+              return (
+                <article
+                  key={book.id}
+                  onMouseEnter={() => {
+                    if (!localMetrics[book.id]) {
+                      handlePreviewCount(book);
+                    }
+                  }}
+                  className="apple-surface rounded-xl sm:rounded-2xl p-3 sm:p-5 flex flex-col lg:flex-row gap-3 sm:gap-5 items-stretch"
+                >
+                  <div className="w-full lg:w-36 aspect-[3/4] rounded-lg sm:rounded-xl overflow-hidden shrink-0 border border-white/10">
+                    <PdfCoverThumbnail
+                      coverUrl={book.coverUrl}
+                      pdfUrl={book.pdfUrl}
+                      alt={book.name}
+                      fallbackAsset={ASSETS.bookMsnr}
+                    />
                   </div>
 
-                  <button
-                    type="button"
-                    disabled={isDownloading}
-                    onClick={() => handleDownload(book)}
-                    className="w-full lg:w-auto px-2.5 sm:px-5 py-2 sm:py-2.5 rounded-lg sm:rounded-xl bg-[#D4AF37] text-[#09090B] text-[11px] sm:text-xs font-semibold hover:bg-[#E5C76B] disabled:opacity-65 transition-colors inline-flex items-center justify-center gap-1.5 sm:gap-2 whitespace-nowrap"
-                  >
-                    {isDownloading ? (
-                      <Loader2 className="w-3 h-3 sm:w-3.5 sm:h-3.5 animate-spin shrink-0" />
-                    ) : (
-                      <Download className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0" />
-                    )}
-                    <span className="truncate">
-                      {isDownloading ? 'Downloading...' : 'Download PDF'}
-                    </span>
-                  </button>
-                </div>
-              </div>
-            </article>
-          );
-          })}
+                  <div className="flex-1 flex flex-col justify-between space-y-2.5 sm:space-y-4">
+                    <div className="space-y-1.5 sm:space-y-2">
+                      <h3 className="text-xs sm:text-lg font-semibold text-[#F5F5F7] leading-snug line-clamp-2">
+                        {book.name}
+                      </h3>
+                      <p className="text-[11px] sm:text-sm text-[#A1A1AA] leading-relaxed line-clamp-2 sm:line-clamp-3">
+                        {book.description}
+                      </p>
+                    </div>
+
+                    <div className="space-y-2 sm:space-y-3 pt-1 sm:pt-2">
+                      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 sm:gap-4 text-[10px] sm:text-xs text-[#8E8E93] font-mono tabular-nums">
+                        <span className="inline-flex items-center gap-1 sm:gap-1.5">
+                          <Eye className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0" />
+                          <span>
+                            {views.toLocaleString()}
+                            <span className="hidden sm:inline"> Views</span>
+                          </span>
+                        </span>
+                        <span aria-hidden="true">·</span>
+                        <span className="inline-flex items-center gap-1 sm:gap-1.5">
+                          <Download className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0" />
+                          <span>
+                            {downloads.toLocaleString()}
+                            <span className="hidden sm:inline"> Downloads</span>
+                          </span>
+                        </span>
+                      </div>
+
+                      <button
+                        type="button"
+                        disabled={isDownloading}
+                        onClick={() => handleDownload(book)}
+                        className="w-full lg:w-auto px-2.5 sm:px-5 py-2 sm:py-2.5 rounded-lg sm:rounded-xl bg-[#D4AF37] text-[#09090B] text-[11px] sm:text-xs font-semibold hover:bg-[#E5C76B] disabled:opacity-65 transition-colors inline-flex items-center justify-center gap-1.5 sm:gap-2 whitespace-nowrap"
+                      >
+                        {isDownloading ? (
+                          <Loader2 className="w-3 h-3 sm:w-3.5 sm:h-3.5 animate-spin shrink-0" />
+                        ) : (
+                          <Download className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0" />
+                        )}
+                        <span className="truncate">
+                          {isDownloading ? 'Downloading...' : 'Download PDF'}
+                        </span>
+                      </button>
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+
+          <PaginationControls
+            currentPage={safePage}
+            totalItems={freeBooks.length}
+            pageSize={MEDIA_PAGE_SIZE}
+            itemLabel={freeBooks.length === 1 ? 'PDF' : 'PDFs'}
+            onPageChange={(nextPage) => {
+              setPage(nextPage);
+              scrollNearestContainerToTop(containerRef.current);
+            }}
+          />
         </div>
       )}
     </div>
@@ -687,11 +762,19 @@ export const PaidPdfsWindow: React.FC = () => {
   const [copiedId, setCopiedId] = useState(false);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [unlockedPdfUrls, setUnlockedPdfUrls] = useState<Record<string, string>>({});
+  const [page, setPage] = useState(1);
+  const containerRef = useRef<HTMLDivElement | null>(null);
 
-  // Resolve protected PDF URLs for unlocked books when coverUrl is still a placeholder
+  const { pageItems: paginatedPaidBooks, safePage } = paginateItems(
+    paidBooks,
+    page,
+    MEDIA_PAGE_SIZE
+  );
+
+  // Resolve protected PDF URLs for unlocked books on the active page when coverUrl is a placeholder
   useEffect(() => {
     let active = true;
-    paidBooks.forEach((book) => {
+    paginatedPaidBooks.forEach((book) => {
       const isUnlocked = isAdmin || bookAccessMap[book.id]?.status === 'APPROVED';
       if (isUnlocked && isPlaceholderBookCover(book.coverUrl) && !unlockedPdfUrls[book.id]) {
         getProtectedPaidBookUrl(book.id)
@@ -706,7 +789,7 @@ export const PaidPdfsWindow: React.FC = () => {
     return () => {
       active = false;
     };
-  }, [paidBooks, bookAccessMap, isAdmin, getProtectedPaidBookUrl, unlockedPdfUrls]);
+  }, [paginatedPaidBooks, bookAccessMap, isAdmin, getProtectedPaidBookUrl, unlockedPdfUrls]);
 
   const openBuyModal = (book: PaidBookPublic) => {
     setPurchaseTarget(book);
@@ -767,7 +850,7 @@ export const PaidPdfsWindow: React.FC = () => {
   };
 
   return (
-    <div className="p-3.5 sm:p-8 space-y-5 sm:space-y-7">
+    <div ref={containerRef} className="p-3.5 sm:p-8 space-y-5 sm:space-y-7">
       <div className="space-y-1">
         <p className="text-xs font-medium text-[#D4AF37]">
           Individual Per-Book Entitlement · Protected Storage Security
@@ -785,98 +868,111 @@ export const PaidPdfsWindow: React.FC = () => {
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-2 gap-3 sm:gap-6">
-          {paidBooks.map((book) => {
-          const isUnlocked = isAdmin || bookAccessMap[book.id]?.status === 'APPROVED';
-          const isDownloading = downloadingId === book.id;
+        <div className="space-y-6">
+          <div className="grid grid-cols-2 gap-3 sm:gap-6">
+            {paginatedPaidBooks.map((book) => {
+              const isUnlocked = isAdmin || bookAccessMap[book.id]?.status === 'APPROVED';
+              const isDownloading = downloadingId === book.id;
 
-          return (
-            <article
-              key={book.id}
-              className="apple-surface rounded-xl sm:rounded-2xl p-3 sm:p-5 flex flex-col lg:flex-row gap-3 sm:gap-5 items-stretch"
-            >
-              <div className="relative w-full lg:w-36 aspect-[3/4] rounded-lg sm:rounded-xl overflow-hidden shrink-0 border border-white/10">
-                <PdfCoverThumbnail
-                  coverUrl={book.coverUrl}
-                  pdfUrl={isUnlocked ? unlockedPdfUrls[book.id] || null : null}
-                  alt={book.name}
-                  fallbackAsset={ASSETS.bookXauusd}
-                />
-                {!isUnlocked && (
-                  <div className="absolute inset-0 bg-black/55 backdrop-blur-[2px] flex flex-col items-center justify-center p-2 sm:p-3 text-center">
-                    <Lock className="w-4 h-4 sm:w-5 sm:h-5 text-[#D4AF37] mb-1 sm:mb-1.5" />
-                    <span className="text-[9px] sm:text-[10px] font-semibold tracking-wide text-[#F5F5F7]">
-                      PREMIUM CONTENT
-                    </span>
+              return (
+                <article
+                  key={book.id}
+                  className="apple-surface rounded-xl sm:rounded-2xl p-3 sm:p-5 flex flex-col lg:flex-row gap-3 sm:gap-5 items-stretch"
+                >
+                  <div className="relative w-full lg:w-36 aspect-[3/4] rounded-lg sm:rounded-xl overflow-hidden shrink-0 border border-white/10">
+                    <PdfCoverThumbnail
+                      coverUrl={book.coverUrl}
+                      pdfUrl={isUnlocked ? unlockedPdfUrls[book.id] || null : null}
+                      alt={book.name}
+                      fallbackAsset={ASSETS.bookXauusd}
+                    />
+                    {!isUnlocked && (
+                      <div className="absolute inset-0 bg-black/55 backdrop-blur-[2px] flex flex-col items-center justify-center p-2 sm:p-3 text-center">
+                        <Lock className="w-4 h-4 sm:w-5 sm:h-5 text-[#D4AF37] mb-1 sm:mb-1.5" />
+                        <span className="text-[9px] sm:text-[10px] font-semibold tracking-wide text-[#F5F5F7]">
+                          PREMIUM CONTENT
+                        </span>
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
 
-              <div className="flex-1 flex flex-col justify-between space-y-2.5 sm:space-y-4">
-                <div className="space-y-1.5 sm:space-y-2">
-                  <div className="flex items-center justify-between gap-1.5 sm:gap-2">
-                    <span className="text-[10px] sm:text-xs text-[#A1A1AA] truncate">
+                  <div className="flex-1 flex flex-col justify-between space-y-2.5 sm:space-y-4">
+                    <div className="space-y-1.5 sm:space-y-2">
+                      <div className="flex items-center justify-between gap-1.5 sm:gap-2">
+                        <span className="text-[10px] sm:text-xs text-[#A1A1AA] truncate">
+                          {isUnlocked ? (
+                            'Unlocked Edition'
+                          ) : (
+                            <>
+                              <span className="sm:hidden">Premium PDF</span>
+                              <span className="hidden sm:inline">
+                                PREMIUM CONTENT · PURCHASE REQUIRED
+                              </span>
+                            </>
+                          )}
+                        </span>
+                        <span className="text-xs sm:text-base font-semibold font-mono tabular-nums text-[#E5C76B] shrink-0">
+                          ${book.price}
+                        </span>
+                      </div>
+                      <h3 className="text-xs sm:text-lg font-semibold text-[#F5F5F7] leading-snug line-clamp-2">
+                        {book.name}
+                      </h3>
+                      <p
+                        className={`text-[11px] sm:text-sm text-[#A1A1AA] leading-relaxed ${
+                          !isUnlocked ? 'line-clamp-2 sm:line-clamp-3' : 'line-clamp-3 sm:line-clamp-none'
+                        }`}
+                      >
+                        {book.description}
+                      </p>
+                    </div>
+
+                    <div className="pt-1 sm:pt-2">
                       {isUnlocked ? (
-                        'Unlocked Edition'
-                      ) : (
-                        <>
-                          <span className="sm:hidden">Premium PDF</span>
-                          <span className="hidden sm:inline">
-                            PREMIUM CONTENT · PURCHASE REQUIRED
+                        <button
+                          type="button"
+                          disabled={isDownloading}
+                          onClick={() => handleUnlockedDownload(book)}
+                          className="w-full lg:w-auto px-2.5 sm:px-5 py-2 sm:py-2.5 rounded-lg sm:rounded-xl bg-[#30D158] text-[#09090B] text-[11px] sm:text-xs font-semibold hover:opacity-90 disabled:opacity-65 transition-opacity inline-flex items-center justify-center gap-1.5 sm:gap-2 whitespace-nowrap"
+                        >
+                          {isDownloading ? (
+                            <Loader2 className="w-3 h-3 sm:w-3.5 sm:h-3.5 animate-spin shrink-0" />
+                          ) : (
+                            <Download className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0" />
+                          )}
+                          <span className="sm:hidden truncate">
+                            {isDownloading ? 'Downloading...' : 'Download PDF'}
                           </span>
-                        </>
-                      )}
-                    </span>
-                    <span className="text-xs sm:text-base font-semibold font-mono tabular-nums text-[#E5C76B] shrink-0">
-                      ${book.price}
-                    </span>
-                  </div>
-                  <h3 className="text-xs sm:text-lg font-semibold text-[#F5F5F7] leading-snug line-clamp-2">
-                    {book.name}
-                  </h3>
-                  <p
-                    className={`text-[11px] sm:text-sm text-[#A1A1AA] leading-relaxed ${
-                      !isUnlocked ? 'line-clamp-2 sm:line-clamp-3' : 'line-clamp-3 sm:line-clamp-none'
-                    }`}
-                  >
-                    {book.description}
-                  </p>
-                </div>
-
-                <div className="pt-1 sm:pt-2">
-                  {isUnlocked ? (
-                    <button
-                      type="button"
-                      disabled={isDownloading}
-                      onClick={() => handleUnlockedDownload(book)}
-                      className="w-full lg:w-auto px-2.5 sm:px-5 py-2 sm:py-2.5 rounded-lg sm:rounded-xl bg-[#30D158] text-[#09090B] text-[11px] sm:text-xs font-semibold hover:opacity-90 disabled:opacity-65 transition-opacity inline-flex items-center justify-center gap-1.5 sm:gap-2 whitespace-nowrap"
-                    >
-                      {isDownloading ? (
-                        <Loader2 className="w-3 h-3 sm:w-3.5 sm:h-3.5 animate-spin shrink-0" />
+                          <span className="hidden sm:inline">
+                            {isDownloading ? 'Downloading PDF...' : 'Download Purchased PDF'}
+                          </span>
+                        </button>
                       ) : (
-                        <Download className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0" />
+                        <button
+                          type="button"
+                          onClick={() => openBuyModal(book)}
+                          className="w-full lg:w-auto px-2.5 sm:px-5 py-2 sm:py-2.5 rounded-lg sm:rounded-xl bg-[#D4AF37] text-[#09090B] text-[11px] sm:text-xs font-semibold hover:bg-[#E5C76B] transition-colors whitespace-nowrap truncate"
+                        >
+                          BUY NOW · ${book.price}
+                        </button>
                       )}
-                      <span className="sm:hidden truncate">
-                        {isDownloading ? 'Downloading...' : 'Download PDF'}
-                      </span>
-                      <span className="hidden sm:inline">
-                        {isDownloading ? 'Downloading PDF...' : 'Download Purchased PDF'}
-                      </span>
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => openBuyModal(book)}
-                      className="w-full lg:w-auto px-2.5 sm:px-5 py-2 sm:py-2.5 rounded-lg sm:rounded-xl bg-[#D4AF37] text-[#09090B] text-[11px] sm:text-xs font-semibold hover:bg-[#E5C76B] transition-colors whitespace-nowrap truncate"
-                    >
-                      BUY NOW · ${book.price}
-                    </button>
-                  )}
-                </div>
-              </div>
-            </article>
-          );
-          })}
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+
+          <PaginationControls
+            currentPage={safePage}
+            totalItems={paidBooks.length}
+            pageSize={MEDIA_PAGE_SIZE}
+            itemLabel={paidBooks.length === 1 ? 'PDF' : 'PDFs'}
+            onPageChange={(nextPage) => {
+              setPage(nextPage);
+              scrollNearestContainerToTop(containerRef.current);
+            }}
+          />
         </div>
       )}
 

@@ -30,7 +30,9 @@ import {
 import {
   fetchYoutubeSubscriberCount,
   getCalendarKeys,
+  normalizeYoutubeChannelId,
   recordUniqueAuthenticatedVisit,
+  sanitizeSubscriberCount,
   verifyYoutubeSubscription,
   type YoutubeCheckResult,
 } from '../lib/integrations';
@@ -270,9 +272,8 @@ export const AcademyProvider: React.FC<{ children: React.ReactNode }> = ({ child
           } else {
             merged.binanceQrUrl = resolveAsset(merged.binanceQrUrl);
           }
-          if (!data.youtubeChannelId) {
-            merged.youtubeChannelId = DEFAULT_SETTINGS.youtubeChannelId;
-          }
+          const validYtId = normalizeYoutubeChannelId(data.youtubeChannelId || '');
+          merged.youtubeChannelId = validYtId || DEFAULT_SETTINGS.youtubeChannelId;
           if (
             !data.youtubeChannelUrl ||
             data.youtubeChannelUrl === 'https://www.youtube.com/@TradeWithAmith'
@@ -300,9 +301,12 @@ export const AcademyProvider: React.FC<{ children: React.ReactNode }> = ({ child
           }
           if (
             data.subscriberCountFallback === '24,800' ||
-            data.subscriberCountFallback === '336'
+            data.subscriberCountFallback === '336' ||
+            !sanitizeSubscriberCount(data.subscriberCountFallback)
           ) {
             merged.subscriberCountFallback = '';
+          } else {
+            merged.subscriberCountFallback = sanitizeSubscriberCount(data.subscriberCountFallback);
           }
           if (
             data.thirdMethodTitle === 'USDT TRC20 / Bank Transfer' &&
@@ -351,18 +355,31 @@ export const AcademyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     };
   }, []);
 
-  // 3. Sync YouTube Subscriber Count when channelId or fallback updates
+  // 3. Sync Live YouTube Subscriber Count on load and every 60 seconds
   useEffect(() => {
     let active = true;
-    fetchYoutubeSubscriberCount(settings.youtubeChannelId, settings.subscriberCountFallback).then(
-      (count) => {
-        if (active) setSubscriberCount(count);
-      }
-    );
+    const syncLiveCount = () => {
+      fetchYoutubeSubscriberCount(
+        settings.youtubeChannelId,
+        settings.subscriberCountFallback,
+        settings.youtubeChannelUrl
+      ).then((count) => {
+        if (active) setSubscriberCount(sanitizeSubscriberCount(count));
+      });
+    };
+
+    syncLiveCount();
+    const timer = window.setInterval(syncLiveCount, 60_000);
     return () => {
       active = false;
+      window.clearInterval(timer);
     };
-  }, [settings.youtubeChannelId, settings.subscriberCountFallback, user]);
+  }, [
+    settings.youtubeChannelId,
+    settings.subscriberCountFallback,
+    settings.youtubeChannelUrl,
+    user,
+  ]);
 
   // 4. User Profile, VIP Grant, Admin Doc, Book Access & Personal Notifications
   useEffect(() => {

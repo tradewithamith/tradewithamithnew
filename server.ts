@@ -94,24 +94,34 @@ async function startServer() {
 
   // 1. Secure server-side YouTube subscriber count lookup with cached fallback
   let cachedSubscriberFetchedAt = 0;
+  let cachedChannelKey = '';
   app.get('/api/youtube/channel-stats', async (req: Request, res: Response) => {
     const rawChannel = String(req.query.channelId || '').trim();
-    const match = rawChannel.match(/youtube\.com\/channel\/([a-zA-Z0-9_-]+)/i);
-    const channelId = match?.[1] || rawChannel;
+    const rawHandle = String(req.query.handle || '').trim();
+    const channelMatch = rawChannel.match(/(UC[a-zA-Z0-9_-]{15,})/);
+    const channelId = channelMatch?.[1] || '';
+    const handleMatch =
+      rawHandle.match(/@([a-zA-Z0-9_.-]+)/) || rawChannel.match(/@([a-zA-Z0-9_.-]+)/);
+    const cleanHandle = handleMatch?.[1] || 'tradewithamithYT';
+    const lookupKey = `${channelId}|${cleanHandle}`;
     const apiKey = process.env.YOUTUBE_API_KEY || '';
 
-    if (!channelId) {
+    if (!channelId && !cleanHandle) {
       res.json({ subscriberCount: cachedSubscriberCount, source: 'fallback' });
       return;
     }
 
-    if (cachedSubscriberCount && Date.now() - cachedSubscriberFetchedAt < 10 * 60_000) {
+    if (
+      cachedSubscriberCount &&
+      cachedChannelKey === lookupKey &&
+      Date.now() - cachedSubscriberFetchedAt < 2 * 60_000
+    ) {
       res.json({ subscriberCount: cachedSubscriberCount, source: 'cached_fresh' });
       return;
     }
 
     try {
-      if (apiKey) {
+      if (apiKey && channelId) {
         const ytRes = await fetch(
           `https://www.googleapis.com/youtube/v3/channels?part=statistics&id=${encodeURIComponent(channelId)}&key=${encodeURIComponent(apiKey)}`
         );
@@ -121,32 +131,40 @@ async function startServer() {
           };
           const count = data.items?.[0]?.statistics?.subscriberCount;
           if (count) {
-            cachedSubscriberCount = Number(count).toLocaleString();
+            cachedSubscriberCount = Number(count).toLocaleString('en-US');
             cachedSubscriberFetchedAt = Date.now();
+            cachedChannelKey = lookupKey;
             res.json({ subscriberCount: cachedSubscriberCount, source: 'youtube_api' });
             return;
           }
         }
       }
 
-      // Public channel page fallback when server API key is not configured
-      const pubRes = await fetch(
-        `https://www.youtube.com/channel/${encodeURIComponent(channelId)}`,
-        {
+      // Public channel page lookup with full browser UA + YouTube consent cookie
+      const candidateUrls = [
+        ...(channelId ? [`https://www.youtube.com/channel/${encodeURIComponent(channelId)}`] : []),
+        ...(cleanHandle ? [`https://www.youtube.com/@${encodeURIComponent(cleanHandle)}`] : []),
+      ];
+
+      for (const targetUrl of candidateUrls) {
+        const pubRes = await fetch(targetUrl, {
           headers: {
             'Accept-Language': 'en-US,en;q=0.9',
-            'User-Agent': 'Mozilla/5.0',
+            Cookie: 'CONSENT=YES+cb.20210328-17-p0.en+FX+999',
+            'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
           },
-        }
-      );
-      if (pubRes.ok) {
-        const html = await pubRes.text();
-        const subMatch = html.match(/([0-9.,KMB]+)\s+subscribers/i);
-        if (subMatch?.[1]) {
-          cachedSubscriberCount = subMatch[1];
-          cachedSubscriberFetchedAt = Date.now();
-          res.json({ subscriberCount: cachedSubscriberCount, source: 'youtube_public' });
-          return;
+        });
+        if (pubRes.ok) {
+          const html = await pubRes.text();
+          const subMatch = html.match(/([0-9][0-9.,]*\s*[KMB]?)\s+subscribers/i);
+          if (subMatch?.[1]) {
+            cachedSubscriberCount = subMatch[1].replace(/\s+/g, '');
+            cachedSubscriberFetchedAt = Date.now();
+            cachedChannelKey = lookupKey;
+            res.json({ subscriberCount: cachedSubscriberCount, source: 'youtube_public' });
+            return;
+          }
         }
       }
 

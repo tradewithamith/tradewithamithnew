@@ -88,6 +88,11 @@ import {
   type VipSignalPrivate,
   type VipSignalPublic,
 } from '../types/academy';
+import {
+  MEDIA_PAGE_SIZE,
+  paginateItems,
+  PaginationControls,
+} from './PaginationControls';
 import { GoogleSignInButton, ResilientImage } from './ResilientImage';
 
 type AdminTab =
@@ -112,8 +117,21 @@ function tsMs(v: unknown): number {
 }
 
 export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitAdmin }) => {
-  const { user, authReady, isAdmin, settings, tradingStats, visitorStats, logout } = useAcademy();
+  const {
+    user,
+    authReady,
+    isAdmin,
+    settings,
+    subscriberCount,
+    tradingStats,
+    visitorStats,
+    logout,
+  } = useAcademy();
   const [activeTab, setActiveTab] = useState<AdminTab>('overview');
+  const [maPage, setMaPage] = useState(1);
+  const [vidPage, setVidPage] = useState(1);
+  const [fbPage, setFbPage] = useState(1);
+  const [pbPage, setPbPage] = useState(1);
   const [authBusy, setAuthBusy] = useState(false);
   const [authError, setAuthError] = useState<ParsedAuthError | null>(null);
   const [copiedHost, setCopiedHost] = useState(false);
@@ -1093,8 +1111,11 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
         heroSubtitle: clampStr(draftSettings.heroSubtitle, 300),
         msnrDescription: clampStr(draftSettings.msnrDescription, 1500),
         winRate: clampStr(tradingStats.winRateFormatted, 30, '0%'),
-        subscriberCountFallback: clampStr(draftSettings.subscriberCountFallback, 40, ''),
-        youtubeChannelId: clampStr(normalizeYoutubeChannelId(draftSettings.youtubeChannelId), 80),
+        subscriberCountFallback: '',
+        youtubeChannelId: clampStr(
+          normalizeYoutubeChannelId(draftSettings.youtubeChannelId) || 'UCKwo4dtX8sFrJcW5I5tZ0cw',
+          80
+        ),
         youtubeChannelUrl: clampStr(draftSettings.youtubeChannelUrl, 300),
         youtubeGateEnabled: Boolean(draftSettings.youtubeGateEnabled),
         pipMultiplier: Math.max(0.1, Number(draftSettings.pipMultiplier) || 10),
@@ -2185,111 +2206,132 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
                 No Market Analysis videos added yet. Paste an unlisted YouTube link above to publish.
               </div>
             ) : (
-              <div className="space-y-3">
-                {allMarketVideos.map((v) => {
-                  const likes = allMarketReactions.filter(
-                    (r) => r.videoId === v.id && r.reaction === 'LIKE'
-                  ).length;
-                  const dislikes = allMarketReactions.filter(
-                    (r) => r.videoId === v.id && r.reaction === 'DISLIKE'
-                  ).length;
-                  const previewThumb =
-                    v.thumbnail || extractYoutubeThumbnail(v.youtubeUrl, ASSETS.heroTerminal);
+              (() => {
+                const { pageItems, safePage } = paginateItems(
+                  allMarketVideos,
+                  maPage,
+                  MEDIA_PAGE_SIZE
+                );
+                return (
+                  <div className="space-y-4">
+                    <div className="space-y-3">
+                      {pageItems.map((v) => {
+                        const likes = allMarketReactions.filter(
+                          (r) => r.videoId === v.id && r.reaction === 'LIKE'
+                        ).length;
+                        const dislikes = allMarketReactions.filter(
+                          (r) => r.videoId === v.id && r.reaction === 'DISLIKE'
+                        ).length;
+                        const previewThumb =
+                          v.thumbnail || extractYoutubeThumbnail(v.youtubeUrl, ASSETS.heroTerminal);
 
-                  return (
-                    <div
-                      key={v.id}
-                      className="apple-surface rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
-                    >
-                      <div className="flex items-start sm:items-center gap-3.5 min-w-0">
-                        <div className="w-24 aspect-video rounded-lg overflow-hidden bg-black/50 border border-white/10 shrink-0">
-                          <ResilientImage
-                            src={previewThumb}
-                            alt={v.title}
-                            className="w-full h-full object-cover"
-                          />
-                        </div>
-                        <div className="min-w-0 space-y-1">
-                          <p className="text-sm font-semibold text-[#F5F5F7] truncate">{v.title}</p>
-                          <p className="text-xs text-[#A1A1AA] truncate">
-                            {v.date} ·{' '}
-                            <span
-                              className={
-                                v.status === 'ACTIVE' ? 'text-[#30D158]' : 'text-[#8E8E93]'
-                              }
-                            >
-                              {v.status}
-                            </span>{' '}
-                            · {v.youtubeUrl}
-                          </p>
-                          <div className="flex items-center gap-3 text-xs font-mono tabular-nums text-[#D1D1D6]">
-                            <span className="inline-flex items-center gap-1 text-[#E5C76B]">
-                              <ThumbsUp className="w-3.5 h-3.5" />
-                              {likes}
-                            </span>
-                            <span className="inline-flex items-center gap-1 text-[#A1A1AA]">
-                              <ThumbsDown className="w-3.5 h-3.5" />
-                              {dislikes}
-                            </span>
+                        return (
+                          <div
+                            key={v.id}
+                            className="apple-surface rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                          >
+                            <div className="flex items-start sm:items-center gap-3.5 min-w-0">
+                              <div className="w-24 aspect-video rounded-lg overflow-hidden bg-black/50 border border-white/10 shrink-0">
+                                <ResilientImage
+                                  src={previewThumb}
+                                  alt={v.title}
+                                  className="w-full h-full object-cover"
+                                />
+                              </div>
+                              <div className="min-w-0 space-y-1">
+                                <p className="text-sm font-semibold text-[#F5F5F7] truncate">
+                                  {v.title}
+                                </p>
+                                <p className="text-xs text-[#A1A1AA] truncate">
+                                  {v.date} ·{' '}
+                                  <span
+                                    className={
+                                      v.status === 'ACTIVE' ? 'text-[#30D158]' : 'text-[#8E8E93]'
+                                    }
+                                  >
+                                    {v.status}
+                                  </span>{' '}
+                                  · {v.youtubeUrl}
+                                </p>
+                                <div className="flex items-center gap-3 text-xs font-mono tabular-nums text-[#D1D1D6]">
+                                  <span className="inline-flex items-center gap-1 text-[#E5C76B]">
+                                    <ThumbsUp className="w-3.5 h-3.5" />
+                                    {likes}
+                                  </span>
+                                  <span className="inline-flex items-center gap-1 text-[#A1A1AA]">
+                                    <ThumbsDown className="w-3.5 h-3.5" />
+                                    {dislikes}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="flex flex-wrap items-center gap-2 shrink-0">
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  await updateDoc(doc(db, 'marketAnalysisVideos', v.id), {
+                                    status: v.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE',
+                                    updatedAt: serverTimestamp(),
+                                  });
+                                  showToast(
+                                    'ok',
+                                    `Video marked ${v.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE'}.`
+                                  );
+                                }}
+                                className="px-2.5 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-xs text-[#D1D1D6]"
+                              >
+                                {v.status === 'ACTIVE' ? 'Hide' : 'Activate'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingMaId(v.id);
+                                  setMaTitle(v.title);
+                                  setMaUrl(v.youtubeUrl);
+                                  setMaThumb(v.thumbnail);
+                                  setMaDate(v.date);
+                                  setMaStatus(v.status);
+                                  setMaDesc(v.description);
+                                }}
+                                className="px-2.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-xs font-semibold text-[#F5F5F7] inline-flex items-center gap-1"
+                              >
+                                <Edit3 className="w-3.5 h-3.5" />
+                                <span>Edit</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setConfirmAction({
+                                    title: 'Delete Market Analysis Video?',
+                                    description: `Permanently delete "${v.title}" from Market Analysis?`,
+                                    onConfirm: async () => {
+                                      await deleteDoc(doc(db, 'marketAnalysisVideos', v.id));
+                                      showToast('ok', 'Market Analysis video deleted.');
+                                    },
+                                  })
+                                }
+                                className="p-2 rounded-lg text-[#FF453A] hover:bg-[#FF453A]/15"
+                                aria-label="Delete Market Analysis video"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
                           </div>
-                        </div>
-                      </div>
-
-                      <div className="flex flex-wrap items-center gap-2 shrink-0">
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            await updateDoc(doc(db, 'marketAnalysisVideos', v.id), {
-                              status: v.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE',
-                              updatedAt: serverTimestamp(),
-                            });
-                            showToast(
-                              'ok',
-                              `Video marked ${v.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE'}.`
-                            );
-                          }}
-                          className="px-2.5 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-xs text-[#D1D1D6]"
-                        >
-                          {v.status === 'ACTIVE' ? 'Hide' : 'Activate'}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setEditingMaId(v.id);
-                            setMaTitle(v.title);
-                            setMaUrl(v.youtubeUrl);
-                            setMaThumb(v.thumbnail);
-                            setMaDate(v.date);
-                            setMaStatus(v.status);
-                            setMaDesc(v.description);
-                          }}
-                          className="px-2.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-xs font-semibold text-[#F5F5F7] inline-flex items-center gap-1"
-                        >
-                          <Edit3 className="w-3.5 h-3.5" />
-                          <span>Edit</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setConfirmAction({
-                              title: 'Delete Market Analysis Video?',
-                              description: `Permanently delete "${v.title}" from Market Analysis?`,
-                              onConfirm: async () => {
-                                await deleteDoc(doc(db, 'marketAnalysisVideos', v.id));
-                                showToast('ok', 'Market Analysis video deleted.');
-                              },
-                            })
-                          }
-                          className="p-2 rounded-lg text-[#FF453A] hover:bg-[#FF453A]/15"
-                          aria-label="Delete Market Analysis video"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
+                        );
+                      })}
                     </div>
-                  );
-                })}
-              </div>
+
+                    <PaginationControls
+                      currentPage={safePage}
+                      totalItems={allMarketVideos.length}
+                      pageSize={MEDIA_PAGE_SIZE}
+                      itemLabel={allMarketVideos.length === 1 ? 'video' : 'videos'}
+                      onPageChange={setMaPage}
+                    />
+                  </div>
+                );
+              })()
             )}
           </div>
         )}
@@ -2419,54 +2461,70 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
               </div>
             </form>
 
-            <div className="space-y-3">
-              {allVideos
-                .filter((v) => !LEGACY_DEMO_VIDEO_IDS.has(v.id))
-                .map((v) => (
-                  <div
-                    key={v.id}
-                    className="apple-surface rounded-xl p-4 flex items-center justify-between gap-4"
-                  >
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold text-[#F5F5F7] truncate">{v.title}</p>
-                    <p className="text-xs text-[#A1A1AA] truncate">{v.youtubeUrl} · {v.status}</p>
+            {(() => {
+              const cleanVideos = allVideos.filter((v) => !LEGACY_DEMO_VIDEO_IDS.has(v.id));
+              const { pageItems, safePage } = paginateItems(cleanVideos, vidPage, MEDIA_PAGE_SIZE);
+              return (
+                <div className="space-y-4">
+                  <div className="space-y-3">
+                    {pageItems.map((v) => (
+                      <div
+                        key={v.id}
+                        className="apple-surface rounded-xl p-4 flex items-center justify-between gap-4"
+                      >
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-[#F5F5F7] truncate">{v.title}</p>
+                          <p className="text-xs text-[#A1A1AA] truncate">
+                            {v.youtubeUrl} · {v.status}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingVidId(v.id);
+                              setVidTitle(v.title);
+                              setVidUrl(v.youtubeUrl);
+                              setVidThumb(v.thumbnail);
+                              setVidDate(v.date);
+                              setVidStatus(v.status);
+                              setVidDesc(v.description);
+                            }}
+                            className="px-2.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-xs font-semibold"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setConfirmAction({
+                                title: 'Delete Video?',
+                                description: `Remove "${v.title}" from the Videos library?`,
+                                onConfirm: async () => {
+                                  await deleteDoc(doc(db, 'videos', v.id));
+                                  showToast('ok', 'Video removed.');
+                                },
+                              })
+                            }
+                            className="p-2 rounded-lg text-[#FF453A] hover:bg-[#FF453A]/15"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setEditingVidId(v.id);
-                        setVidTitle(v.title);
-                        setVidUrl(v.youtubeUrl);
-                        setVidThumb(v.thumbnail);
-                        setVidDate(v.date);
-                        setVidStatus(v.status);
-                        setVidDesc(v.description);
-                      }}
-                      className="px-2.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-xs font-semibold"
-                    >
-                      Edit
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setConfirmAction({
-                          title: 'Delete Video?',
-                          description: `Remove "${v.title}" from the Videos library?`,
-                          onConfirm: async () => {
-                            await deleteDoc(doc(db, 'videos', v.id));
-                            showToast('ok', 'Video removed.');
-                          },
-                        })
-                      }
-                      className="p-2 rounded-lg text-[#FF453A] hover:bg-[#FF453A]/15"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
+
+                  <PaginationControls
+                    currentPage={safePage}
+                    totalItems={cleanVideos.length}
+                    pageSize={MEDIA_PAGE_SIZE}
+                    itemLabel={cleanVideos.length === 1 ? 'video' : 'videos'}
+                    onPageChange={setVidPage}
+                  />
                 </div>
-              ))}
-            </div>
+              );
+            })()}
           </div>
         )}
 
@@ -2639,54 +2697,70 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
               </div>
             </form>
 
-            <div className="space-y-3">
-              {allFreeBooks
-                .filter((b) => !LEGACY_DEMO_FREE_BOOK_IDS.has(b.id))
-                .map((b) => (
-                <div
-                  key={b.id}
-                  className="apple-surface rounded-xl p-4 flex items-center justify-between gap-4"
-                >
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold truncate">{b.name}</p>
-                    <p className="text-xs font-mono text-[#A1A1AA]">
-                      {b.views} views · {b.downloads} downloads · {b.status}
-                    </p>
+            {(() => {
+              const cleanFreeBooks = allFreeBooks.filter(
+                (b) => !LEGACY_DEMO_FREE_BOOK_IDS.has(b.id)
+              );
+              const { pageItems, safePage } = paginateItems(cleanFreeBooks, fbPage, MEDIA_PAGE_SIZE);
+              return (
+                <div className="space-y-4">
+                  <div className="space-y-3">
+                    {pageItems.map((b) => (
+                      <div
+                        key={b.id}
+                        className="apple-surface rounded-xl p-4 flex items-center justify-between gap-4"
+                      >
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold truncate">{b.name}</p>
+                          <p className="text-xs font-mono text-[#A1A1AA]">
+                            {b.views} views · {b.downloads} downloads · {b.status}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingFbId(b.id);
+                              setFbName(b.name);
+                              setFbDesc(b.description);
+                              setFbCover(b.coverUrl);
+                              setFbPdf(b.pdfUrl);
+                            }}
+                            className="px-2.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-xs font-semibold"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setConfirmAction({
+                                title: 'Delete Free PDF?',
+                                description: `Remove "${b.name}" from Free PDFs?`,
+                                onConfirm: async () => {
+                                  await deleteDoc(doc(db, 'freeBooks', b.id));
+                                  showToast('ok', 'Free PDF deleted.');
+                                },
+                              })
+                            }
+                            className="p-2 rounded-lg text-[#FF453A] hover:bg-[#FF453A]/15"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setEditingFbId(b.id);
-                        setFbName(b.name);
-                        setFbDesc(b.description);
-                        setFbCover(b.coverUrl);
-                        setFbPdf(b.pdfUrl);
-                      }}
-                      className="px-2.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-xs font-semibold"
-                    >
-                      Edit
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setConfirmAction({
-                          title: 'Delete Free PDF?',
-                          description: `Remove "${b.name}" from Free PDFs?`,
-                          onConfirm: async () => {
-                            await deleteDoc(doc(db, 'freeBooks', b.id));
-                            showToast('ok', 'Free PDF deleted.');
-                          },
-                        })
-                      }
-                      className="p-2 rounded-lg text-[#FF453A] hover:bg-[#FF453A]/15"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
+
+                  <PaginationControls
+                    currentPage={safePage}
+                    totalItems={cleanFreeBooks.length}
+                    pageSize={MEDIA_PAGE_SIZE}
+                    itemLabel={cleanFreeBooks.length === 1 ? 'PDF' : 'PDFs'}
+                    onPageChange={setFbPage}
+                  />
                 </div>
-              ))}
-            </div>
+              );
+            })()}
           </div>
         )}
 
@@ -2884,67 +2958,83 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
               </div>
             </form>
 
-            <div className="space-y-3">
-              {allPaidBooks
-                .filter((b) => !LEGACY_DEMO_PAID_BOOK_IDS.has(b.id))
-                .map((b) => (
-                <div
-                  key={b.id}
-                  className="apple-surface rounded-xl p-4 flex items-center justify-between gap-4"
-                >
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold truncate">
-                      {b.name} · <span className="font-mono text-[#E5C76B]">${b.price}</span>
-                    </p>
-                    <p className="text-xs text-[#A1A1AA] truncate">{b.description}</p>
+            {(() => {
+              const cleanPaidBooks = allPaidBooks.filter(
+                (b) => !LEGACY_DEMO_PAID_BOOK_IDS.has(b.id)
+              );
+              const { pageItems, safePage } = paginateItems(cleanPaidBooks, pbPage, MEDIA_PAGE_SIZE);
+              return (
+                <div className="space-y-4">
+                  <div className="space-y-3">
+                    {pageItems.map((b) => (
+                      <div
+                        key={b.id}
+                        className="apple-surface rounded-xl p-4 flex items-center justify-between gap-4"
+                      >
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold truncate">
+                            {b.name} · <span className="font-mono text-[#E5C76B]">${b.price}</span>
+                          </p>
+                          <p className="text-xs text-[#A1A1AA] truncate">{b.description}</p>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              setEditingPbId(b.id);
+                              setPbName(b.name);
+                              setPbDesc(b.description);
+                              setPbPrice(String(b.price));
+                              setPbCover(b.coverUrl);
+                              try {
+                                const protSnap = await getDoc(doc(db, 'paidBooksProtected', b.id));
+                                setPbPdf(
+                                  protSnap.exists()
+                                    ? (protSnap.data() as { pdfUrl?: string }).pdfUrl || ''
+                                    : ''
+                                );
+                              } catch {
+                                setPbPdf('');
+                              }
+                            }}
+                            className="px-2.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-xs font-semibold"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setConfirmAction({
+                                title: 'Delete Paid Book?',
+                                description: `Remove "${b.name}" from Paid PDFs?`,
+                                onConfirm: async () => {
+                                  const batch = writeBatch(db);
+                                  batch.delete(doc(db, 'paidBooksPublic', b.id));
+                                  batch.delete(doc(db, 'paidBooksProtected', b.id));
+                                  await batch.commit();
+                                  showToast('ok', 'Paid book removed.');
+                                },
+                              })
+                            }
+                            className="p-2 rounded-lg text-[#FF453A] hover:bg-[#FF453A]/15"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        setEditingPbId(b.id);
-                        setPbName(b.name);
-                        setPbDesc(b.description);
-                        setPbPrice(String(b.price));
-                        setPbCover(b.coverUrl);
-                        try {
-                          const protSnap = await getDoc(doc(db, 'paidBooksProtected', b.id));
-                          setPbPdf(
-                            protSnap.exists()
-                              ? (protSnap.data() as { pdfUrl?: string }).pdfUrl || ''
-                              : ''
-                          );
-                        } catch {
-                          setPbPdf('');
-                        }
-                      }}
-                      className="px-2.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-xs font-semibold"
-                    >
-                      Edit
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setConfirmAction({
-                          title: 'Delete Paid Book?',
-                          description: `Remove "${b.name}" from Paid PDFs?`,
-                          onConfirm: async () => {
-                            const batch = writeBatch(db);
-                            batch.delete(doc(db, 'paidBooksPublic', b.id));
-                            batch.delete(doc(db, 'paidBooksProtected', b.id));
-                            await batch.commit();
-                            showToast('ok', 'Paid book removed.');
-                          },
-                        })
-                      }
-                      className="p-2 rounded-lg text-[#FF453A] hover:bg-[#FF453A]/15"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
+
+                  <PaginationControls
+                    currentPage={safePage}
+                    totalItems={cleanPaidBooks.length}
+                    pageSize={MEDIA_PAGE_SIZE}
+                    itemLabel={cleanPaidBooks.length === 1 ? 'PDF' : 'PDFs'}
+                    onPageChange={setPbPage}
+                  />
                 </div>
-              ))}
-            </div>
+              );
+            })()}
           </div>
         )}
 
@@ -3607,6 +3697,8 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
                   <label className="block text-xs text-[#A1A1AA] mb-1">YouTube Channel ID</label>
                   <input
                     type="text"
+                    name="youtube_channel_id"
+                    autoComplete="off"
                     placeholder="UC..."
                     value={draftSettings.youtubeChannelId}
                     onChange={(e) =>
@@ -3619,6 +3711,8 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
                   <label className="block text-xs text-[#A1A1AA] mb-1">YouTube Channel URL</label>
                   <input
                     type="url"
+                    name="youtube_channel_url"
+                    autoComplete="off"
                     value={draftSettings.youtubeChannelUrl}
                     onChange={(e) =>
                       setDraftSettings({ ...draftSettings, youtubeChannelUrl: e.target.value })
@@ -3628,19 +3722,12 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
                 </div>
                 <div>
                   <label className="block text-xs text-[#A1A1AA] mb-1">
-                    Fallback Subscriber Count
+                    Students (Live YouTube Subscribers)
                   </label>
-                  <input
-                    type="text"
-                    value={draftSettings.subscriberCountFallback}
-                    onChange={(e) =>
-                      setDraftSettings({
-                        ...draftSettings,
-                        subscriberCountFallback: e.target.value,
-                      })
-                    }
-                    className="w-full px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm font-mono"
-                  />
+                  <div className="w-full px-3.5 py-2 rounded-xl bg-white/[0.02] border border-white/[0.08] text-sm font-mono tabular-nums text-[#F5F5F7] flex items-center justify-between gap-2">
+                    <span>{subscriberCount || 'Syncing...'}</span>
+                    <span className="text-[11px] text-[#8E8E93]">Live Sync</span>
+                  </div>
                 </div>
               </div>
             </section>
