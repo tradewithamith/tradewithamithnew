@@ -99,7 +99,6 @@ interface AcademyContextValue {
   login: (opts?: { includeYoutubeScope?: boolean; includeSheetsScope?: boolean }) => Promise<User | null>;
   logout: () => Promise<void>;
   verifySubscriberGate: () => Promise<YoutubeCheckResult>;
-  bypassGateForSession: () => void;
   submitVipRequest: (input: {
     name: string;
     telegram: string;
@@ -265,11 +264,7 @@ export const AcademyProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
       const token = getValidYoutubeAccessToken(user.uid);
       if (!token) {
-        if (sessionStorage.getItem('msnr_yt_session_bypass') === '1') {
-          setGateVerified(true);
-        } else {
-          setGateVerified(false);
-        }
+        setGateVerified(false);
         return;
       }
 
@@ -281,7 +276,6 @@ export const AcademyProvider: React.FC<{ children: React.ReactNode }> = ({ child
         setGateVerified(true);
         setGateMessage(null);
       } else if (check.status === 'NOT_SUBSCRIBED') {
-        sessionStorage.removeItem('msnr_yt_session_bypass');
         setGateVerified(false);
         setGateMessage(check.message);
         if (user.emailVerified) {
@@ -294,9 +288,8 @@ export const AcademyProvider: React.FC<{ children: React.ReactNode }> = ({ child
         clearYoutubeAccessToken();
         setGateVerified(false);
       } else if (check.status === 'API_LIMITED') {
-        if (sessionStorage.getItem('msnr_yt_session_bypass') === '1') {
-          setGateVerified(true);
-        }
+        setGateVerified(false);
+        setGateMessage(check.message);
       }
     };
 
@@ -963,7 +956,10 @@ export const AcademyProvider: React.FC<{ children: React.ReactNode }> = ({ child
       const parsed = parseFirebaseAuthError(err);
       const errText = parsed.isUnauthorizedDomain
         ? `${parsed.message} Add "${parsed.hostname}" in Firebase Console → Authentication → Settings → Authorized domains.`
+        : parsed.isUserCancelled
+        ? 'Google Sign-In was cancelled. Please sign in with Google to verify your YouTube subscription.'
         : parsed.message;
+      setGateVerified(false);
       setGateMessage(errText);
       return {
         status: 'API_LIMITED',
@@ -973,15 +969,6 @@ export const AcademyProvider: React.FC<{ children: React.ReactNode }> = ({ child
       setGateBusy(false);
     }
   }, [settings.youtubeChannelId]);
-
-  const bypassGateForSession = useCallback(() => {
-    setGateVerified(true);
-    try {
-      sessionStorage.setItem('msnr_yt_session_bypass', '1');
-    } catch {
-      // Ignore
-    }
-  }, []);
 
   const submitVipRequest = useCallback(
     async (input: {
@@ -1193,7 +1180,6 @@ export const AcademyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     login,
     logout,
     verifySubscriberGate,
-    bypassGateForSession,
     submitVipRequest,
     submitBookPurchase,
     incrementFreeBookMetric,

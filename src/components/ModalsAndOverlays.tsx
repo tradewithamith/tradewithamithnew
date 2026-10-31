@@ -601,9 +601,7 @@ export const YoutubeGateOverlay: React.FC = () => {
     gateBusy,
     gateMessage,
     verifySubscriberGate,
-    bypassGateForSession,
   } = useAcademy();
-  const [apiLimitedNotice, setApiLimitedNotice] = useState<string | null>(null);
   const [subscribedClicked, setSubscribedClicked] = useState(false);
 
   if (!settings.youtubeGateEnabled || gateVerified) {
@@ -611,16 +609,10 @@ export const YoutubeGateOverlay: React.FC = () => {
   }
 
   const handleVerify = async () => {
-    setApiLimitedNotice(null);
     try {
-      const res = await verifySubscriberGate();
-      if (res.status === 'API_LIMITED') {
-        setApiLimitedNotice(res.message);
-      }
+      await verifySubscriberGate();
     } catch {
-      setApiLimitedNotice(
-        'YouTube API OAuth verification requires either adding your email under Test Users or publishing the OAuth Consent Screen in Google Cloud Console.'
-      );
+      // Error state is handled via gateMessage in AcademyContext
     }
   };
 
@@ -677,22 +669,9 @@ export const YoutubeGateOverlay: React.FC = () => {
           </button>
         </div>
 
-        {gateMessage && !apiLimitedNotice && (
-          <div className="p-3 rounded-xl bg-[#FF453A]/15 text-[#FF453A] text-xs font-medium">
+        {gateMessage && (
+          <div className="p-3.5 rounded-xl bg-[#FF453A]/15 border border-[#FF453A]/25 text-[#FF6961] text-xs font-medium leading-relaxed text-left">
             {gateMessage}
-          </div>
-        )}
-
-        {apiLimitedNotice && (
-          <div className="p-3.5 rounded-xl bg-white/[0.05] border border-white/10 text-left space-y-2.5">
-            <p className="text-xs text-[#D1D1D6] leading-relaxed">{apiLimitedNotice}</p>
-            <button
-              type="button"
-              onClick={bypassGateForSession}
-              className="w-full py-2 rounded-lg bg-[#D4AF37] text-[#09090B] hover:bg-[#E5C76B] text-xs font-semibold transition-colors"
-            >
-              Enter Academy Workspace
-            </button>
           </div>
         )}
 
