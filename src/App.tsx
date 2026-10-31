@@ -43,7 +43,12 @@ const VALID_WINDOWS: WindowId[] = [
 function detectInitialPage(): StaticPageId {
   if (typeof window !== 'undefined') {
     const path = window.location.pathname.toLowerCase().replace(/\/+$/, '');
-    if (path === '/admin' || path.startsWith('/admin/') || path.endsWith('/admin.html')) {
+    if (
+      path === '/admin' ||
+      path.startsWith('/admin/') ||
+      path.endsWith('/admin') ||
+      path.endsWith('/admin.html')
+    ) {
       return 'admin';
     }
     if (path === '/terms' || path.endsWith('/terms.html')) return 'terms';
