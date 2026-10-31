@@ -9,7 +9,15 @@ interface SignalsWindowProps {
 }
 
 export const SignalsWindow: React.FC<SignalsWindowProps> = ({ onOpenVipJoin }) => {
-  const { signals, tradingStats, isVipActive, settings, vipGrant, isAdmin } = useAcademy();
+  const {
+    signals,
+    tradingStats,
+    isVipActive,
+    hasPendingVipRequest,
+    settings,
+    vipGrant,
+    isAdmin,
+  } = useAcademy();
   const [tab, setTab] = useState<'active' | 'history'>('active');
 
   const todayIso = new Date().toISOString().slice(0, 10);
@@ -20,13 +28,19 @@ export const SignalsWindow: React.FC<SignalsWindowProps> = ({ onOpenVipJoin }) =
   // Active unsettled signals never add to realized pip statistics.
   const enrichedSignals = useMemo(() => {
     return signals.map((sig) => {
+      const validDir = sig.direction === 'BUY' || sig.direction === 'SELL' ? sig.direction : null;
       let realizedPips = 0;
       if (sig.result !== 'ACTIVE') {
         if (sig.result === 'CLOSED') {
           realizedPips = Number(sig.pips) || 0;
-        } else if (sig.entry !== undefined && sig.tp !== undefined && sig.sl !== undefined) {
+        } else if (
+          validDir &&
+          sig.entry !== undefined &&
+          sig.tp !== undefined &&
+          sig.sl !== undefined
+        ) {
           realizedPips = calculateSignalPips({
-            direction: sig.direction,
+            direction: validDir,
             entry: sig.entry,
             tp: sig.tp,
             sl: sig.sl,
@@ -39,9 +53,9 @@ export const SignalsWindow: React.FC<SignalsWindowProps> = ({ onOpenVipJoin }) =
       }
 
       const targetPips =
-        sig.result === 'ACTIVE' && sig.entry !== undefined && sig.tp !== undefined
+        sig.result === 'ACTIVE' && validDir && sig.entry !== undefined && sig.tp !== undefined
           ? calculateTargetPips({
-              direction: sig.direction,
+              direction: validDir,
               entry: sig.entry,
               tp: sig.tp,
               pipMultiplier: settings.pipMultiplier,
@@ -91,136 +105,149 @@ export const SignalsWindow: React.FC<SignalsWindowProps> = ({ onOpenVipJoin }) =
   };
 
   const renderSignalCard = (sig: MergedSignal & { displayPips: number; targetPips: number }) => {
-    const isBuy = sig.direction === 'BUY';
-    const hasPrivateDetails = isVipActive && sig.entry !== undefined;
+    const hasPrivateDetails =
+      isVipActive && sig.entry !== undefined && sig.direction !== 'LOCKED';
+    const isBuy = hasPrivateDetails && sig.direction === 'BUY';
 
     return (
       <article
         key={sig.id}
         className="relative apple-surface rounded-2xl p-6 overflow-hidden flex flex-col justify-between gap-5"
       >
-        {/* Top Metadata Row (Zero-Pill Unboxed Typography) */}
-        <div className="flex items-start justify-between gap-4">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2 text-xs text-[#A1A1AA] font-mono tabular-nums">
-              <span>{sig.date}</span>
-              <span aria-hidden="true">·</span>
-              <span>{sig.orderType}</span>
-              <span aria-hidden="true">·</span>
-              <span>{sig.result}</span>
-            </div>
-            <div className="flex items-center gap-3">
-              <h3 className="text-xl font-semibold tracking-tight text-[#F5F5F7]">
-                {sig.currency}
-              </h3>
-              <span
-                className={`inline-flex items-center gap-1 text-sm font-semibold ${
-                  isBuy ? 'text-[#30D158]' : 'text-[#FF453A]'
-                }`}
-              >
-                {isBuy ? (
-                  <TrendingUp className="w-4 h-4" />
-                ) : (
-                  <TrendingDown className="w-4 h-4" />
-                )}
-                {sig.direction}
-              </span>
-            </div>
-          </div>
-
-          <div className="text-right font-mono tabular-nums">
-            {sig.result === 'ACTIVE' ? (
-              <span className="text-xs sm:text-sm font-semibold text-[#E5C76B]">
-                {hasPrivateDetails && sig.targetPips !== 0
-                  ? `Target ${formatSignedPips(sig.targetPips)}`
-                  : 'LIVE · RUNNING'}
-              </span>
-            ) : (
-              <span
-                className={`text-sm font-semibold ${
-                  sig.displayPips > 0
-                    ? 'text-[#30D158]'
-                    : sig.displayPips < 0
-                    ? 'text-[#FF453A]'
-                    : 'text-[#D1D1D6]'
-                }`}
-              >
-                {formatSignedPips(sig.displayPips)}
-              </span>
-            )}
-          </div>
-        </div>
-
-        {/* Execution Levels Area */}
-        <div className="relative">
-          <div
-            className={`grid grid-cols-2 sm:grid-cols-4 gap-3 font-mono tabular-nums text-sm ${
-              !hasPrivateDetails ? 'blur-md select-none pointer-events-none opacity-45' : ''
-            }`}
-            aria-hidden={!hasPrivateDetails}
-          >
-            <div className="p-3 rounded-xl bg-white/[0.03] border border-white/[0.06]">
-              <p className="text-[11px] font-sans text-[#8E8E93]">Entry Price</p>
-              <p className="mt-1 font-semibold text-[#F5F5F7]">
-                {hasPrivateDetails ? sig.entry : '█████'}
-              </p>
-            </div>
-            <div className="p-3 rounded-xl bg-white/[0.03] border border-white/[0.06]">
-              <p className="text-[11px] font-sans text-[#8E8E93]">TP</p>
-              <p className="mt-1 font-semibold text-[#30D158]">
-                {hasPrivateDetails ? sig.tp : '█████'}
-              </p>
-            </div>
-            <div className="p-3 rounded-xl bg-white/[0.03] border border-white/[0.06]">
-              <p className="text-[11px] font-sans text-[#8E8E93]">Extra TP</p>
-              <p className="mt-1 font-semibold text-[#E5C76B]">
-                {hasPrivateDetails ? sig.extraTp : '█████'}
-              </p>
-            </div>
-            <div className="p-3 rounded-xl bg-white/[0.03] border border-white/[0.06]">
-              <p className="text-[11px] font-sans text-[#8E8E93]">SL</p>
-              <p className="mt-1 font-semibold text-[#FF453A]">
-                {hasPrivateDetails ? sig.sl : '█████'}
-              </p>
-            </div>
-          </div>
-
-          {/* Trade Note */}
-          <div
-            className={`mt-3 text-xs text-[#A1A1AA] leading-relaxed ${
-              !hasPrivateDetails ? 'blur-md select-none pointer-events-none opacity-40' : ''
-            }`}
-          >
-            <span className="text-[#D1D1D6] font-medium">Note: </span>
-            {hasPrivateDetails
-              ? sig.note || 'Follow standard MSNR body-close confirmation rules.'
-              : 'VIP execution confirmation criteria hidden for public visitors.'}
-          </div>
-
-          {/* Public Non-VIP Frosted Glass Lock Overlay */}
-          {!hasPrivateDetails && (
-            <div className="absolute inset-0 rounded-xl apple-glass flex flex-col sm:flex-row items-center justify-between gap-3 px-5 py-4">
-              <div className="flex items-center gap-3 text-center sm:text-left">
-                <Lock className="w-4 h-4 text-[#D4AF37] shrink-0" />
-                <div>
-                  <p className="text-xs font-semibold tracking-wide text-[#F5F5F7]">
-                    VIP ACCESS REQUIRED
-                  </p>
-                  <p className="text-xs text-[#A1A1AA]">
-                    Unlock live Entry, TP, Extra TP, SL, and MSNR confirmation notes.
-                  </p>
-                </div>
+        <div
+          className={`flex flex-col justify-between gap-5 ${
+            !hasPrivateDetails ? 'blur-md select-none pointer-events-none opacity-35' : ''
+          }`}
+          aria-hidden={!hasPrivateDetails}
+        >
+          {/* Top Metadata Row (Zero-Pill Unboxed Typography) */}
+          <div className="flex items-start justify-between gap-4">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2 text-xs text-[#A1A1AA] font-mono tabular-nums">
+                <span>{hasPrivateDetails ? sig.date : '••••-••-••'}</span>
+                <span aria-hidden="true">·</span>
+                <span>{hasPrivateDetails ? sig.orderType : '•••••'}</span>
+                <span aria-hidden="true">·</span>
+                <span>{hasPrivateDetails ? sig.result : '••••••'}</span>
               </div>
-              <button
-                type="button"
-                onClick={onOpenVipJoin}
-                className="px-4 py-2 rounded-lg bg-[#D4AF37] text-[#09090B] text-xs font-semibold hover:bg-[#E5C76B] transition-colors whitespace-nowrap shrink-0"
-              >
-                JOIN VIP
-              </button>
+              <div className="flex items-center gap-3">
+                <h3 className="text-xl font-semibold tracking-tight text-[#F5F5F7]">
+                  {hasPrivateDetails ? sig.currency : '••••••'}
+                </h3>
+                {hasPrivateDetails ? (
+                  <span
+                    className={`inline-flex items-center gap-1 text-sm font-semibold ${
+                      isBuy ? 'text-[#30D158]' : 'text-[#FF453A]'
+                    }`}
+                  >
+                    {isBuy ? (
+                      <TrendingUp className="w-4 h-4" />
+                    ) : (
+                      <TrendingDown className="w-4 h-4" />
+                    )}
+                    {sig.direction}
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 text-sm font-semibold text-[#A1A1AA]">
+                    ••••
+                  </span>
+                )}
+              </div>
             </div>
-          )}
+
+            <div className="text-right font-mono tabular-nums">
+              {!hasPrivateDetails ? (
+                <span className="text-xs sm:text-sm font-semibold text-[#A1A1AA]">
+                  •••• PIPS
+                </span>
+              ) : sig.result === 'ACTIVE' ? (
+                <span className="text-xs sm:text-sm font-semibold text-[#E5C76B]">
+                  {sig.targetPips !== 0
+                    ? `Target ${formatSignedPips(sig.targetPips)}`
+                    : 'LIVE · RUNNING'}
+                </span>
+              ) : (
+                <span
+                  className={`text-sm font-semibold ${
+                    sig.displayPips > 0
+                      ? 'text-[#30D158]'
+                      : sig.displayPips < 0
+                      ? 'text-[#FF453A]'
+                      : 'text-[#D1D1D6]'
+                  }`}
+                >
+                  {formatSignedPips(sig.displayPips)}
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Execution Levels Area */}
+          <div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 font-mono tabular-nums text-sm">
+              <div className="p-3 rounded-xl bg-white/[0.03] border border-white/[0.06]">
+                <p className="text-[11px] font-sans text-[#8E8E93]">Entry Price</p>
+                <p className="mt-1 font-semibold text-[#F5F5F7]">
+                  {hasPrivateDetails ? sig.entry : '█████'}
+                </p>
+              </div>
+              <div className="p-3 rounded-xl bg-white/[0.03] border border-white/[0.06]">
+                <p className="text-[11px] font-sans text-[#8E8E93]">TP</p>
+                <p className="mt-1 font-semibold text-[#30D158]">
+                  {hasPrivateDetails ? sig.tp : '█████'}
+                </p>
+              </div>
+              <div className="p-3 rounded-xl bg-white/[0.03] border border-white/[0.06]">
+                <p className="text-[11px] font-sans text-[#8E8E93]">Extra TP</p>
+                <p className="mt-1 font-semibold text-[#E5C76B]">
+                  {hasPrivateDetails ? sig.extraTp : '█████'}
+                </p>
+              </div>
+              <div className="p-3 rounded-xl bg-white/[0.03] border border-white/[0.06]">
+                <p className="text-[11px] font-sans text-[#8E8E93]">SL</p>
+                <p className="mt-1 font-semibold text-[#FF453A]">
+                  {hasPrivateDetails ? sig.sl : '█████'}
+                </p>
+              </div>
+            </div>
+
+            {/* Trade Note */}
+            <div className="mt-3 text-xs text-[#A1A1AA] leading-relaxed">
+              <span className="text-[#D1D1D6] font-medium">Note: </span>
+              {hasPrivateDetails
+                ? sig.note || 'Follow standard MSNR body-close confirmation rules.'
+                : '████████████████████████████████████████████'}
+            </div>
+          </div>
         </div>
+
+        {/* Full-Card Frosted Glass Lock Overlay Until Manual Admin Approval */}
+        {!hasPrivateDetails && (
+          <div className="absolute inset-0 z-10 rounded-2xl apple-glass flex flex-col sm:flex-row items-center justify-between gap-4 px-6 py-5">
+            <div className="flex items-center gap-3.5 text-center sm:text-left">
+              <Lock className="w-5 h-5 text-[#D4AF37] shrink-0" />
+              <div>
+                <p className="text-xs font-semibold tracking-wide text-[#F5F5F7]">
+                  {hasPendingVipRequest
+                    ? 'APPROVAL PENDING · SIGNALS LOCKED'
+                    : 'VIP ACCESS REQUIRED'}
+                </p>
+                <p className="mt-0.5 text-xs text-[#A1A1AA] max-w-md">
+                  {hasPendingVipRequest
+                    ? 'Your access request is awaiting manual Admin verification. All signal details remain locked until approved.'
+                    : 'Unlock live Entry, TP, Extra TP, SL, and MSNR confirmation notes after Admin approval.'}
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={onOpenVipJoin}
+              className="px-4 py-2 rounded-lg bg-[#D4AF37] text-[#09090B] text-xs font-semibold hover:bg-[#E5C76B] transition-colors whitespace-nowrap shrink-0"
+            >
+              {hasPendingVipRequest ? 'REQUEST PENDING' : 'JOIN VIP'}
+            </button>
+          </div>
+        )}
       </article>
     );
   };
@@ -245,8 +272,16 @@ export const SignalsWindow: React.FC<SignalsWindowProps> = ({ onOpenVipJoin }) =
                 ? 'Admin Full Access Active'
                 : vipGrant?.vipType === 'LIFETIME'
                 ? 'Lifetime VIP Active'
-                : `Monthly VIP Active · Expires ${new Date(vipGrant?.vipExpiryMs || 0).toLocaleDateString()}`}
+                : `${vipGrant?.vipType === 'CUSTOM' ? 'Verified' : 'Monthly'} VIP Active · Expires ${new Date(vipGrant?.vipExpiryMs || 0).toLocaleDateString()}`}
             </span>
+          ) : hasPendingVipRequest ? (
+            <button
+              type="button"
+              onClick={onOpenVipJoin}
+              className="px-4 py-2 rounded-xl bg-[#D4AF37]/15 border border-[#D4AF37]/45 text-[#E5C76B] text-xs font-semibold hover:bg-[#D4AF37]/25 transition-colors whitespace-nowrap shrink-0"
+            >
+              Verification Pending · Signals Locked
+            </button>
           ) : (
             <button
               type="button"
@@ -399,46 +434,91 @@ export const SignalsWindow: React.FC<SignalsWindowProps> = ({ onOpenVipJoin }) =
               </thead>
               <tbody className="divide-y divide-white/[0.06] font-mono tabular-nums">
                 {historySignals.map((sig) => {
-                  const unlocked = isVipActive && sig.entry !== undefined;
+                  const unlocked =
+                    isVipActive && sig.entry !== undefined && sig.direction !== 'LOCKED';
                   return (
                     <tr key={sig.id} className="hover:bg-white/[0.02] transition-colors">
-                      <td className="py-3.5 px-5 text-xs text-[#D1D1D6]">{sig.date}</td>
+                      <td className="py-3.5 px-5 text-xs text-[#D1D1D6]">
+                        {unlocked ? (
+                          sig.date
+                        ) : (
+                          <span className="blur-sm select-none pointer-events-none">••••-••-••</span>
+                        )}
+                      </td>
                       <td className="py-3.5 px-4 font-sans font-semibold text-[#F5F5F7]">
-                        {sig.currency}
+                        {unlocked ? (
+                          sig.currency
+                        ) : (
+                          <span className="blur-sm select-none pointer-events-none">••••••</span>
+                        )}
                       </td>
                       <td
                         className={`py-3.5 px-4 font-sans font-semibold ${
-                          sig.direction === 'BUY' ? 'text-[#30D158]' : 'text-[#FF453A]'
+                          !unlocked
+                            ? 'text-[#A1A1AA]'
+                            : sig.direction === 'BUY'
+                            ? 'text-[#30D158]'
+                            : 'text-[#FF453A]'
                         }`}
                       >
-                        {sig.direction}
+                        {unlocked ? (
+                          sig.direction
+                        ) : (
+                          <span className="blur-sm select-none pointer-events-none">••••</span>
+                        )}
                       </td>
                       <td className="py-3.5 px-4 text-right text-[#F5F5F7]">
-                        {unlocked ? sig.entry : <span className="blur-xs select-none">•••••</span>}
+                        {unlocked ? (
+                          sig.entry
+                        ) : (
+                          <span className="blur-sm select-none pointer-events-none">•••••</span>
+                        )}
                       </td>
                       <td className="py-3.5 px-4 text-right text-[#30D158]">
-                        {unlocked ? sig.tp : <span className="blur-xs select-none">•••••</span>}
+                        {unlocked ? (
+                          sig.tp
+                        ) : (
+                          <span className="blur-sm select-none pointer-events-none">•••••</span>
+                        )}
                       </td>
                       <td className="py-3.5 px-4 text-right text-[#FF453A]">
-                        {unlocked ? sig.sl : <span className="blur-xs select-none">•••••</span>}
+                        {unlocked ? (
+                          sig.sl
+                        ) : (
+                          <span className="blur-sm select-none pointer-events-none">•••••</span>
+                        )}
                       </td>
                       <td
                         className={`py-3.5 px-4 font-sans text-xs font-semibold ${
-                          sig.result === 'TP HIT'
+                          !unlocked
+                            ? 'text-[#A1A1AA]'
+                            : sig.result === 'TP HIT'
                             ? 'text-[#30D158]'
                             : sig.result === 'SL HIT'
                             ? 'text-[#FF453A]'
                             : 'text-[#D1D1D6]'
                         }`}
                       >
-                        {sig.result}
+                        {unlocked ? (
+                          sig.result
+                        ) : (
+                          <span className="blur-sm select-none pointer-events-none">••••••</span>
+                        )}
                       </td>
                       <td
                         className={`py-3.5 px-5 text-right font-semibold ${
-                          sig.displayPips >= 0 ? 'text-[#30D158]' : 'text-[#FF453A]'
+                          !unlocked
+                            ? 'text-[#A1A1AA]'
+                            : sig.displayPips >= 0
+                            ? 'text-[#30D158]'
+                            : 'text-[#FF453A]'
                         }`}
                       >
-                        {formatSignedPips(sig.displayPips)}
+                        {unlocked ? (
+                          formatSignedPips(sig.displayPips)
+                        ) : (
+                          <span className="blur-sm select-none pointer-events-none">•••• PIPS</span>
+                        )}
                       </td>
                     </tr>
                   );
@@ -448,14 +528,16 @@ export const SignalsWindow: React.FC<SignalsWindowProps> = ({ onOpenVipJoin }) =
             {!isVipActive && (
               <div className="px-5 py-3.5 border-t border-white/[0.08] flex items-center justify-between gap-4 bg-white/[0.02]">
                 <span className="text-xs text-[#A1A1AA]">
-                  Historical Entry, TP, and SL prices are blurred for public visitors.
+                  {hasPendingVipRequest
+                    ? 'Your access request is awaiting manual Admin approval. All signal details remain blurred until verified.'
+                    : 'All signal details are blurred until your access request is verified and approved by Admin.'}
                 </span>
                 <button
                   type="button"
                   onClick={onOpenVipJoin}
                   className="px-3.5 py-1.5 rounded-lg bg-[#D4AF37] text-[#09090B] text-xs font-semibold hover:bg-[#E5C76B] transition-colors whitespace-nowrap"
                 >
-                  JOIN VIP
+                  {hasPendingVipRequest ? 'REQUEST PENDING' : 'JOIN VIP'}
                 </button>
               </div>
             )}

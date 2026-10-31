@@ -1,15 +1,17 @@
 import {
   doc,
   getDoc,
+  setDoc,
   writeBatch,
   serverTimestamp,
 } from 'firebase/firestore';
-import { db, getAccessToken } from './firebase';
+import { auth, db, getAccessToken, getValidYoutubeAccessToken } from './firebase';
 import type { VisitorStatistics } from '../types/academy';
 
 export type YoutubeCheckResult =
   | { status: 'SUBSCRIBED'; message: string }
   | { status: 'NOT_SUBSCRIBED'; message: string }
+  | { status: 'TOKEN_EXPIRED'; message: string }
   | { status: 'UNCONFIGURED'; message: string }
   | { status: 'API_LIMITED'; message: string };
 
@@ -75,11 +77,11 @@ export async function verifyYoutubeSubscription(
     };
   }
 
-  const token = overrideToken ?? getAccessToken();
+  const token = overrideToken ?? getValidYoutubeAccessToken(auth.currentUser?.uid);
   if (!token) {
     return {
-      status: 'API_LIMITED',
-      message: 'Please sign in with Google and grant YouTube read access to verify your subscription.',
+      status: 'TOKEN_EXPIRED',
+      message: 'Please verify your YouTube subscription with Google to continue.',
     };
   }
 
@@ -87,6 +89,7 @@ export async function verifyYoutubeSubscription(
     const url = `https://www.googleapis.com/youtube/v3/subscriptions?part=snippet&mine=true&forChannelId=${encodeURIComponent(cleanChannelId)}`;
     const response = await fetch(url, {
       headers: { Authorization: `Bearer ${token}` },
+      cache: 'no-store',
     });
 
     if (response.status === 200) {
@@ -99,7 +102,14 @@ export async function verifyYoutubeSubscription(
       }
       return {
         status: 'NOT_SUBSCRIBED',
-        message: 'Please subscribe first, then click Verify Subscription again.',
+        message: 'You are not currently subscribed to Trade With Amith on YouTube. Please subscribe first, then click Verify Subscription.',
+      };
+    }
+
+    if (response.status === 401) {
+      return {
+        status: 'TOKEN_EXPIRED',
+        message: 'Your Google YouTube verification session expired. Please verify your subscription again.',
       };
     }
 
@@ -121,24 +131,50 @@ export async function verifyYoutubeSubscription(
   }
 }
 
+async function syncSubscriberCountToFirestore(channelId: string, count: string): Promise<void> {
+  if (!auth.currentUser?.emailVerified) return;
+  const clean = sanitizeSubscriberCount(count);
+  if (!clean) return;
+  const throttleKey = 'msnr_yt_stats_synced_at';
+  const lastWrite = Number(sessionStorage.getItem(throttleKey) || '0');
+  if (Date.now() - lastWrite < 10 * 60_000) return;
+
+  try {
+    sessionStorage.setItem(throttleKey, String(Date.now()));
+    await setDoc(doc(db, 'youtubeStats', 'live'), {
+      channelId: channelId.slice(0, 80),
+      subscriberCount: clean.slice(0, 40),
+      updatedAt: serverTimestamp(),
+    });
+  } catch {
+    // Non-blocking sync
+  }
+}
+
 /**
  * Retrieves live YouTube subscriber count via authenticated token, YouTube API key,
- * server/Cloudflare proxy, or public static-host reader — strictly rejecting non-numeric strings.
+ * server/Cloudflare proxy, SocialCounts live API, Jina reader, or Firestore live cache.
  */
 export async function fetchYoutubeSubscriberCount(
   channelId: string,
   fallbackCount: string,
   channelUrl?: string
 ): Promise<string> {
-  const localCacheKey = 'msnr_live_yt_subs_v4';
+  const localCacheKey = 'msnr_live_yt_subs_v5';
   const cleanId = normalizeYoutubeChannelId(channelId) || 'UCKwo4dtX8sFrJcW5I5tZ0cw';
   const handleMatch = (channelUrl || '').match(/@([a-zA-Z0-9_.-]+)/);
   const handle = handleMatch ? `@${handleMatch[1]}` : '@tradewithamithYT';
   const safeFallback = sanitizeSubscriberCount(fallbackCount);
   const safeCached = sanitizeSubscriberCount(localStorage.getItem(localCacheKey));
 
-  // 1. Try authenticated YouTube Data API v3 if Google OAuth token is in memory
-  const token = getAccessToken();
+  const recordFreshCount = (countStr: string): string => {
+    localStorage.setItem(localCacheKey, countStr);
+    void syncSubscriberCountToFirestore(cleanId, countStr);
+    return countStr;
+  };
+
+  // 1. Try authenticated YouTube Data API v3 if Google OAuth token is valid
+  const token = getValidYoutubeAccessToken(auth.currentUser?.uid);
   if (token && cleanId) {
     try {
       const res = await fetch(
@@ -150,11 +186,10 @@ export async function fetchYoutubeSubscriberCount(
           items?: Array<{ statistics?: { subscriberCount?: string } }>;
         };
         const raw = json.items?.[0]?.statistics?.subscriberCount;
-        if (raw) {
+        if (raw !== undefined && raw !== null && /^\d+$/.test(String(raw))) {
           const formatted = sanitizeSubscriberCount(Number(raw).toLocaleString('en-US'));
           if (formatted) {
-            localStorage.setItem(localCacheKey, formatted);
-            return formatted;
+            return recordFreshCount(formatted);
           }
         }
       }
@@ -175,11 +210,10 @@ export async function fetchYoutubeSubscriberCount(
           items?: Array<{ statistics?: { subscriberCount?: string } }>;
         };
         const raw = json.items?.[0]?.statistics?.subscriberCount;
-        if (raw) {
+        if (raw !== undefined && raw !== null && /^\d+$/.test(String(raw))) {
           const formatted = sanitizeSubscriberCount(Number(raw).toLocaleString('en-US'));
           if (formatted) {
-            localStorage.setItem(localCacheKey, formatted);
-            return formatted;
+            return recordFreshCount(formatted);
           }
         }
       }
@@ -199,32 +233,73 @@ export async function fetchYoutubeSubscriberCount(
         const data = (await res.json()) as { subscriberCount?: string | null };
         const cleanCount = sanitizeSubscriberCount(data.subscriberCount);
         if (cleanCount) {
-          localStorage.setItem(localCacheKey, cleanCount);
-          return cleanCount;
+          return recordFreshCount(cleanCount);
         }
       }
     }
   } catch {
-    // Fall through to pure static-host fallback
+    // Fall through to direct browser CORS live endpoints
   }
 
-  // 4. Pure static-host fallback (e.g. GitHub Pages without /api backend)
+  // 4. Direct CORS-enabled SocialCounts Live YouTube Subscriber API (works on any static host)
+  if (cleanId) {
+    try {
+      const scRes = await fetch(
+        `https://api.socialcounts.org/youtube-live-subscriber-count/${encodeURIComponent(cleanId)}`,
+        { headers: { Accept: 'application/json' } }
+      );
+      if (scRes.ok) {
+        const scJson = (await scRes.json()) as {
+          counters?: {
+            api?: { subscriberCount?: number };
+            estimation?: { subscriberCount?: number };
+          };
+        };
+        const exact =
+          scJson?.counters?.api?.subscriberCount ??
+          scJson?.counters?.estimation?.subscriberCount;
+        if (typeof exact === 'number' && Number.isFinite(exact) && exact >= 0) {
+          const formatted = sanitizeSubscriberCount(exact.toLocaleString('en-US'));
+          if (formatted) {
+            return recordFreshCount(formatted);
+          }
+        }
+      }
+    } catch {
+      // Fall through to Jina reader
+    }
+  }
+
+  // 5. Direct CORS-enabled Jina Reader fallback
   try {
-    const ytTarget = `https://www.youtube.com/channel/${encodeURIComponent(cleanId)}`;
-    const staticProxyRes = await fetch(
-      `https://api.allorigins.win/raw?url=${encodeURIComponent(ytTarget)}`
-    );
-    if (staticProxyRes.ok) {
-      const html = await staticProxyRes.text();
-      const subMatch = html.match(/([0-9][0-9.,]*\s*[KMB]?)\s+subscribers/i);
+    const jinaRes = await fetch(`https://r.jina.ai/https://www.youtube.com/${handle}`, {
+      headers: { Accept: 'text/plain' },
+    });
+    if (jinaRes.ok) {
+      const text = await jinaRes.text();
+      const subMatch = text.match(/([0-9][0-9.,]*\s*[KMB]?)\s+subscribers/i);
       const cleanCount = sanitizeSubscriberCount(subMatch?.[1]);
+      if (cleanCount) {
+        return recordFreshCount(cleanCount);
+      }
+    }
+  } catch {
+    // Fall through to Firestore live cache
+  }
+
+  // 6. Firestore /youtubeStats/live fallback
+  try {
+    const snap = await getDoc(doc(db, 'youtubeStats', 'live'));
+    if (snap.exists()) {
+      const data = snap.data() as { subscriberCount?: string };
+      const cleanCount = sanitizeSubscriberCount(data.subscriberCount);
       if (cleanCount) {
         localStorage.setItem(localCacheKey, cleanCount);
         return cleanCount;
       }
     }
   } catch {
-    // Ignore network / CORS reader limits
+    // Ignore offline error
   }
 
   return safeCached || safeFallback;

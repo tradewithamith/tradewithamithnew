@@ -215,11 +215,9 @@ const WorkspaceShell: React.FC = () => {
     tab: 'apple' | 'android';
   }>({ open: false, tab: 'apple' });
 
-  // Sync dynamic document title with Admin siteName
+  // Sync dynamic document title with Admin siteName ("Trade With Amith")
   useEffect(() => {
-    if (settings.siteName) {
-      document.title = `${settings.siteName} — MSNR Academy`;
-    }
+    document.title = settings.siteName || 'Trade With Amith';
   }, [settings.siteName]);
 
   // Track responsive desktop vs iPhone mobile mode

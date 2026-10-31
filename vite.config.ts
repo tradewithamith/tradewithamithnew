@@ -38,7 +38,10 @@ export default defineConfig(() => {
         manifest: false,
         includeAssets: [
           'manifest.json',
+          'push-handler.js',
           'icon.svg',
+          'favicon.png',
+          'favicon.ico',
           'apple-touch-icon.png',
           'pwa-192x192.png',
           'pwa-512x512.png',
@@ -48,6 +51,10 @@ export default defineConfig(() => {
           'assets/aistudio/binance_qr_c6b76463.jpg',
         ],
         workbox: {
+          cleanupOutdatedCaches: true,
+          skipWaiting: true,
+          clientsClaim: true,
+          importScripts: ['./push-handler.js'],
           maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
           globPatterns: ['**/*.{js,css,html,ico,png,jpg,JPG,svg,woff,woff2,json}'],
           navigateFallback: null,

@@ -11,7 +11,11 @@ import {
 } from 'lucide-react';
 import { useAcademy } from '../context/AcademyContext';
 import { parseFirebaseAuthError } from '../lib/firebase';
-import { formatTelegramHandle, normalizeTelegramUrl } from '../lib/integrations';
+import {
+  extractYoutubeVideoId,
+  formatTelegramHandle,
+  normalizeTelegramUrl,
+} from '../lib/integrations';
 import { ASSETS, type WindowId } from '../types/academy';
 import { GoogleSignInButton, ResilientImage } from './ResilientImage';
 
@@ -131,25 +135,73 @@ export const HomeWindow: React.FC<HomeWindowProps> = ({
           </div>
         </div>
 
-        {/* Visual Showcase Panel */}
-        <div className="lg:col-span-5 relative rounded-2xl overflow-hidden border border-white/[0.08] min-h-[260px]">
-          <ResilientImage
-            src={ASSETS.heroTerminal}
-            alt="Spatial XAUUSD Gold Support and Resistance Terminal"
-            className="w-full h-full object-cover"
-          />
-          <div className="absolute inset-0 bg-gradient-to-t from-[#070709]/90 via-[#070709]/35 to-transparent flex flex-col justify-end p-6">
-            <div className="text-xs text-[#D1D1D6] flex items-center gap-2">
-              <span>XAUUSD Gold</span>
-              <span aria-hidden="true">·</span>
-              <span>H4 &amp; Daily Roadblocks</span>
-              <span aria-hidden="true">·</span>
-              <span>VIP Execution</span>
-            </div>
-            <p className="mt-1.5 text-sm font-medium text-[#F5F5F7]">
-              Clean structural price levels without retail indicator noise.
-            </p>
-          </div>
+        {/* Visual Showcase Panel (Custom Autoplay Looping Video or Default Showcase Image) */}
+        <div className="lg:col-span-5 relative rounded-2xl overflow-hidden border border-white/[0.08] min-h-[260px] bg-[#070709]">
+          {(() => {
+            const customVideoUrl = (settings.heroVideoUrl || '').trim();
+            if (!customVideoUrl) {
+              return (
+                <>
+                  <ResilientImage
+                    src={ASSETS.heroTerminal}
+                    alt="Spatial XAUUSD Gold Support and Resistance Terminal"
+                    className="w-full h-full object-cover"
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-[#070709]/90 via-[#070709]/35 to-transparent flex flex-col justify-end p-6">
+                    <div className="text-xs text-[#D1D1D6] flex items-center gap-2">
+                      <span>XAUUSD Gold</span>
+                      <span aria-hidden="true">·</span>
+                      <span>H4 &amp; Daily Roadblocks</span>
+                      <span aria-hidden="true">·</span>
+                      <span>VIP Execution</span>
+                    </div>
+                    <p className="mt-1.5 text-sm font-medium text-[#F5F5F7]">
+                      Clean structural price levels without retail indicator noise.
+                    </p>
+                  </div>
+                </>
+              );
+            }
+
+            const ytId = extractYoutubeVideoId(customVideoUrl);
+            if (ytId) {
+              return (
+                <iframe
+                  key={ytId}
+                  src={`https://www.youtube.com/embed/${ytId}?autoplay=1&mute=1&loop=1&playlist=${ytId}&controls=0&showinfo=0&rel=0&modestbranding=1&playsinline=1&iv_load_policy=3&disablekb=1`}
+                  title={`${settings.siteName} Showcase Video`}
+                  allow="autoplay; encrypted-media; picture-in-picture"
+                  className="absolute inset-0 w-full h-full object-cover scale-[1.04] pointer-events-none border-0"
+                />
+              );
+            }
+
+            const vimeoId = customVideoUrl.match(/vimeo\.com\/(?:video\/)?(\d+)/i)?.[1];
+            if (vimeoId) {
+              return (
+                <iframe
+                  key={vimeoId}
+                  src={`https://player.vimeo.com/video/${vimeoId}?background=1&autoplay=1&loop=1&byline=0&title=0&muted=1`}
+                  title={`${settings.siteName} Showcase Video`}
+                  allow="autoplay; fullscreen; picture-in-picture"
+                  className="absolute inset-0 w-full h-full object-cover pointer-events-none border-0"
+                />
+              );
+            }
+
+            return (
+              <video
+                key={customVideoUrl}
+                src={customVideoUrl}
+                autoPlay
+                muted
+                loop
+                playsInline
+                preload="auto"
+                className="absolute inset-0 w-full h-full object-cover"
+              />
+            );
+          })()}
         </div>
       </div>
 

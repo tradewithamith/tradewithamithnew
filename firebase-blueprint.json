@@ -118,11 +118,11 @@
         },
         "direction": {
           "type": "string",
-          "enum": ["BUY", "SELL"]
+          "enum": ["BUY", "SELL", "LOCKED"]
         },
         "orderType": {
           "type": "string",
-          "enum": ["LIMIT", "MARKET"]
+          "enum": ["LIMIT", "MARKET", "LOCKED"]
         },
         "result": {
           "type": "string",
@@ -144,7 +144,7 @@
     },
     "VipSignalPrivate": {
       "title": "VipSignalPrivate",
-      "description": "VIP-protected XAUUSD execution levels and trade notes.",
+      "description": "VIP-protected XAUUSD execution direction, order type, levels, and trade notes.",
       "type": "object",
       "properties": {
         "id": {
@@ -155,6 +155,16 @@
         "currency": {
           "type": "string",
           "enum": ["XAUUSD"]
+        },
+        "direction": {
+          "type": "string",
+          "maxLength": 10,
+          "enum": ["BUY", "SELL"]
+        },
+        "orderType": {
+          "type": "string",
+          "maxLength": 10,
+          "enum": ["LIMIT", "MARKET"]
         },
         "entry": {
           "type": "number"
@@ -555,6 +565,7 @@
       "properties": {
         "siteName": { "type": "string", "maxLength": 120 },
         "logoUrl": { "type": "string", "maxLength": 500 },
+        "heroVideoUrl": { "type": "string", "maxLength": 1000 },
         "heroSubtitle": { "type": "string", "maxLength": 300 },
         "msnrDescription": { "type": "string", "maxLength": 1500 },
         "winRate": { "type": "string", "maxLength": 30 },
@@ -733,6 +744,83 @@
         }
       },
       "required": ["id", "videoId", "userId", "reaction", "status", "createdAt", "updatedAt"]
+    },
+    "PushVapidConfig": {
+      "title": "PushVapidConfig",
+      "description": "Admin-isolated Web Push VAPID ECDSA P-256 keypair vault.",
+      "type": "object",
+      "properties": {
+        "publicKey": { "type": "string", "minLength": 40, "maxLength": 200 },
+        "privateKey": { "type": "string", "minLength": 20, "maxLength": 200 },
+        "subject": { "type": "string", "minLength": 5, "maxLength": 200 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["publicKey", "privateKey", "subject", "updatedAt"]
+    },
+    "PushPublicConfig": {
+      "title": "PushPublicConfig",
+      "description": "Public Web Push VAPID applicationServerKey for Service Worker registration.",
+      "type": "object",
+      "properties": {
+        "publicKey": { "type": "string", "minLength": 40, "maxLength": 200 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["publicKey", "updatedAt"]
+    },
+    "YoutubeLiveStats": {
+      "title": "YoutubeLiveStats",
+      "description": "Cached live YouTube subscriber count synced for instant cross-region display.",
+      "type": "object",
+      "properties": {
+        "channelId": { "type": "string", "minLength": 5, "maxLength": 80 },
+        "subscriberCount": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["channelId", "subscriberCount", "updatedAt"]
+    },
+    "PushSubscriptionRecord": {
+      "title": "PushSubscriptionRecord",
+      "description": "User Service Worker Web Push subscription endpoint and encryption keys.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "userId": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "endpoint": {
+          "type": "string",
+          "minLength": 12,
+          "maxLength": 1500
+        },
+        "p256dh": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 256
+        },
+        "auth": {
+          "type": "string",
+          "minLength": 6,
+          "maxLength": 128
+        },
+        "active": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "userId", "endpoint", "p256dh", "auth", "active", "createdAt", "updatedAt"]
     }
   },
   "firestore": {
@@ -750,11 +838,11 @@
     },
     "/vipSignalsPublic/{signalId}": {
       "schema": "VipSignalPublic",
-      "description": "Public signal cards with sensitive execution prices omitted."
+      "description": "Public signal cards with sensitive execution prices, direction, and order type locked."
     },
     "/vipSignalsPrivate/{signalId}": {
       "schema": "VipSignalPrivate",
-      "description": "VIP-restricted XAUUSD entry, TP, SL, and trade notes."
+      "description": "VIP-restricted XAUUSD direction, order type, entry, TP, SL, and trade notes."
     },
     "/vipRequests/{requestId}": {
       "schema": "VipRequest",
@@ -807,6 +895,22 @@
     "/statistics/{statId}": {
       "schema": "VisitorStatistics",
       "description": "Public and admin visitor counters."
+    },
+    "/pushConfig/{configId}": {
+      "schema": "PushVapidConfig",
+      "description": "Admin-isolated VAPID private/public keypair document."
+    },
+    "/pushPublic/{docId}": {
+      "schema": "PushPublicConfig",
+      "description": "Public VAPID applicationServerKey document."
+    },
+    "/youtubeStats/{docId}": {
+      "schema": "YoutubeLiveStats",
+      "description": "Live synced YouTube subscriber count document."
+    },
+    "/pushSubscriptions/{subId}": {
+      "schema": "PushSubscriptionRecord",
+      "description": "Owner-isolated and admin-dispatchable Web Push Service Worker subscriptions."
     }
   }
 }

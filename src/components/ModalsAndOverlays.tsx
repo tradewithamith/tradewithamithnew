@@ -16,6 +16,7 @@ import {
 import { useAcademy } from '../context/AcademyContext';
 import { usePWAInstall } from '../hooks/usePWAInstall';
 import { formatTelegramHandle, normalizeTelegramUrl } from '../lib/integrations';
+import { subscribeUserToBackgroundPush } from '../lib/pushNotifications';
 import { BinanceQrDisplay, ResilientImage } from './ResilientImage';
 
 export const VipJoinModal: React.FC<{
@@ -84,8 +85,10 @@ export const VipJoinModal: React.FC<{
         type: 'ok',
         text:
           selectedOption === 'EXNESS'
-            ? 'Verification submitted (PENDING). Once Admin verifies your Exness account deposit, Lifetime VIP unlocks.'
-            : 'Payment submitted (PENDING). Once Admin verifies your transaction, 30-day VIP access activates.',
+            ? 'Verification submitted (PENDING). Signal details remain locked until Admin manually verifies and approves your Exness account.'
+            : selectedOption === 'BINANCE'
+            ? 'Payment submitted (PENDING). Signal details remain locked until Admin manually verifies and approves your transaction.'
+            : 'Access request submitted (PENDING). Signal details remain locked until Admin manually verifies and approves your request.',
       });
       setExnessId('');
       setTransactionId('');
@@ -441,7 +444,7 @@ export const InstallAppModal: React.FC<{
     <div
       role="dialog"
       aria-modal="true"
-      aria-label="Install MSNR Academy App"
+      aria-label={`Install ${settings.siteName || 'Trade With Amith'} App`}
       className="fixed inset-0 z-50 bg-black/75 backdrop-blur-md flex items-center justify-center p-4"
     >
       <div className="w-full max-w-lg apple-window rounded-2xl overflow-hidden">
@@ -449,11 +452,13 @@ export const InstallAppModal: React.FC<{
           <div className="flex items-center gap-3">
             <ResilientImage
               src={settings.logoUrl}
-              alt={settings.siteName}
+              alt={settings.siteName || 'Trade With Amith'}
               className="w-9 h-9 rounded-xl object-cover border border-white/15"
             />
             <div>
-              <h3 className="text-base font-semibold text-[#F5F5F7]">Install MSNR Academy</h3>
+              <h3 className="text-base font-semibold text-[#F5F5F7]">
+                Install {settings.siteName || 'Trade With Amith'}
+              </h3>
               <p className="text-xs text-[#A1A1AA]">Standalone Home Screen &amp; Desktop App</p>
             </div>
           </div>
@@ -520,8 +525,8 @@ export const InstallAppModal: React.FC<{
                   Scroll down and tap <strong className="text-[#F5F5F7]">Add to Home Screen</strong>.
                 </li>
                 <li>
-                  Tap <strong className="text-[#F5F5F7]">Add</strong> to launch MSNR Academy in
-                  full-screen Apple mode.
+                  Tap <strong className="text-[#F5F5F7]">Add</strong> to launch{' '}
+                  {settings.siteName || 'Trade With Amith'} in full-screen standalone mode.
                 </li>
               </ol>
             </div>
@@ -569,7 +574,7 @@ export const InstallAppModal: React.FC<{
 
           {isInstalled ? (
             <p className="text-xs text-center text-[#30D158] font-medium">
-              MSNR Academy is already installed on this device.
+              {settings.siteName || 'Trade With Amith'} is already installed on this device.
             </p>
           ) : (
             isInstallable && (
@@ -595,32 +600,15 @@ export const YoutubeGateOverlay: React.FC = () => {
     gateVerified,
     gateBusy,
     gateMessage,
-    login,
     verifySubscriberGate,
     bypassGateForSession,
   } = useAcademy();
   const [apiLimitedNotice, setApiLimitedNotice] = useState<string | null>(null);
   const [subscribedClicked, setSubscribedClicked] = useState(false);
-  const [stdBusy, setStdBusy] = useState(false);
 
   if (!settings.youtubeGateEnabled || gateVerified) {
     return null;
   }
-
-  const handleStandardSignInAndContinue = async () => {
-    setApiLimitedNotice(null);
-    setStdBusy(true);
-    try {
-      await login();
-      bypassGateForSession();
-    } catch {
-      setApiLimitedNotice(
-        'Google OAuth consent screen is currently in Testing mode for external emails. If you have subscribed on YouTube, you may continue below while Publishing Status is updated in Google Cloud Console.'
-      );
-    } finally {
-      setStdBusy(false);
-    }
-  };
 
   const handleVerify = async () => {
     setApiLimitedNotice(null);
@@ -675,36 +663,18 @@ export const YoutubeGateOverlay: React.FC = () => {
             <ExternalLink className="w-3.5 h-3.5 text-[#A1A1AA]" />
           </a>
 
-          {subscribedClicked ? (
-            <button
-              type="button"
-              disabled={stdBusy || gateBusy}
-              onClick={handleStandardSignInAndContinue}
-              className="w-full py-3 px-4 rounded-xl bg-[#D4AF37] hover:bg-[#E5C76B] text-[#09090B] text-xs font-semibold transition-colors disabled:opacity-50"
-            >
-              {stdBusy ? 'SIGNING IN...' : 'I SUBSCRIBED · CONTINUE TO ACADEMY'}
-            </button>
-          ) : (
-            <button
-              type="button"
-              disabled={gateBusy || stdBusy}
-              onClick={handleVerify}
-              className="w-full py-3 px-4 rounded-xl bg-[#D4AF37] hover:bg-[#E5C76B] text-[#09090B] text-xs font-semibold transition-colors disabled:opacity-50"
-            >
-              {gateBusy ? 'VERIFYING VIA YOUTUBE API...' : 'VERIFY SUBSCRIPTION'}
-            </button>
-          )}
-
-          {subscribedClicked && (
-            <button
-              type="button"
-              disabled={gateBusy || stdBusy}
-              onClick={handleVerify}
-              className="w-full py-2 px-3 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-[11px] font-medium text-[#A1A1AA] hover:text-[#F5F5F7] transition-colors disabled:opacity-50"
-            >
-              {gateBusy ? 'Checking YouTube API...' : 'Or Verify Strictly via YouTube Data API'}
-            </button>
-          )}
+          <button
+            type="button"
+            disabled={gateBusy}
+            onClick={handleVerify}
+            className="w-full py-3 px-4 rounded-xl bg-[#D4AF37] hover:bg-[#E5C76B] text-[#09090B] text-xs font-semibold transition-colors disabled:opacity-50"
+          >
+            {gateBusy
+              ? 'VERIFYING VIA YOUTUBE API...'
+              : subscribedClicked
+              ? 'I SUBSCRIBED · VERIFY SUBSCRIPTION'
+              : 'VERIFY SUBSCRIPTION'}
+          </button>
         </div>
 
         {gateMessage && !apiLimitedNotice && (
@@ -727,7 +697,7 @@ export const YoutubeGateOverlay: React.FC = () => {
         )}
 
         <p className="text-[11px] text-[#8E8E93] leading-relaxed">
-          Subscribe to @tradewithamithYT first, then continue or verify via Google Sign-In.
+          Subscribe to @tradewithamithYT first, then verify your subscription via Google Sign-In.
         </p>
       </div>
     </div>
@@ -735,7 +705,7 @@ export const YoutubeGateOverlay: React.FC = () => {
 };
 
 export const NotificationCenter: React.FC = () => {
-  const { settings, notifications, gateVerified } = useAcademy();
+  const { user, settings, notifications, gateVerified } = useAcademy();
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [dismissedIds, setDismissedIds] = useState<Record<string, boolean>>(() => {
     try {
@@ -763,17 +733,8 @@ export const NotificationCenter: React.FC = () => {
 
   const handleAllowOnboarding = async () => {
     try {
-      if (typeof Notification !== 'undefined' && 'requestPermission' in Notification) {
-        const result = await Notification.requestPermission();
-        if (result === 'granted') {
-          localStorage.setItem('msnr_notif_permission_granted', 'true');
-        } else {
-          // User explicitly clicked ALLOW inside our academy onboarding prompt
-          localStorage.setItem('msnr_notif_permission_granted', 'true');
-        }
-      } else {
-        localStorage.setItem('msnr_notif_permission_granted', 'true');
-      }
+      await subscribeUserToBackgroundPush(user?.uid || null);
+      localStorage.setItem('msnr_notif_permission_granted', 'true');
     } catch {
       localStorage.setItem('msnr_notif_permission_granted', 'true');
     }

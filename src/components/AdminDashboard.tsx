@@ -65,6 +65,10 @@ import {
   extractPdfCoverFromUrl,
 } from '../lib/pdfTools';
 import {
+  dispatchAdminWebPush,
+  ensureAdminVapidKeys,
+} from '../lib/pushNotifications';
+import {
   ASSETS,
   LEGACY_DEMO_FREE_BOOK_IDS,
   LEGACY_DEMO_PAID_BOOK_IDS,
@@ -240,6 +244,7 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
   // Attach Admin Firestore Listeners ONLY when verified Admin
   useEffect(() => {
     if (!user || !isAdmin) return;
+    void ensureAdminVapidKeys();
 
     const u1 = onSnapshot(
       collection(db, 'vipSignalsPublic'),
@@ -272,6 +277,8 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
           map[d.id] = {
             id: d.id,
             currency: 'XAUUSD',
+            direction: r.direction,
+            orderType: r.orderType,
             entry: r.entry,
             tp: r.tp,
             extraTp: r.extraTp,
@@ -638,6 +645,38 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
     }
   };
 
+  // Automatically harden any legacy public signals so direction/orderType are stored only in vipSignalsPrivate
+  useEffect(() => {
+    if (!user || !isAdmin || pubSignals.length === 0) return;
+    const exposed = pubSignals.filter(
+      (s) =>
+        !LEGACY_DEMO_SIGNAL_IDS.has(s.id) &&
+        privSignals[s.id] !== undefined &&
+        (s.direction !== 'LOCKED' || s.orderType !== 'LOCKED')
+    );
+    if (exposed.length === 0) return;
+
+    const batch = writeBatch(db);
+    for (const s of exposed) {
+      const priv = privSignals[s.id];
+      const realDir: SignalDirection =
+        priv?.direction || (s.direction !== 'LOCKED' ? s.direction : 'BUY');
+      const realOrder: SignalOrderType =
+        priv?.orderType || (s.orderType !== 'LOCKED' ? s.orderType : 'LIMIT');
+      batch.update(doc(db, 'vipSignalsPrivate', s.id), {
+        direction: realDir,
+        orderType: realOrder,
+        updatedAt: serverTimestamp(),
+      });
+      batch.update(doc(db, 'vipSignalsPublic', s.id), {
+        direction: 'LOCKED',
+        orderType: 'LOCKED',
+        updatedAt: serverTimestamp(),
+      });
+    }
+    batch.commit().catch(() => {});
+  }, [user, isAdmin, pubSignals, privSignals]);
+
   // --- Signals CRUD ---
   const handleSaveSignal = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -662,6 +701,8 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
       customClosedPips: sigResult === 'CLOSED' ? closedPipsNum : undefined,
     });
 
+    const isCreatingNew = !editingSignalId;
+
     try {
       const id = editingSignalId || sanitizeId(`sig_xau_${Date.now()}`);
       const batch = writeBatch(db);
@@ -669,13 +710,15 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
       if (editingSignalId) {
         batch.update(doc(db, 'vipSignalsPublic', id), {
           date: clampStr(sigDate, 40),
-          direction: sigDirection,
-          orderType: sigOrderType,
+          direction: 'LOCKED',
+          orderType: 'LOCKED',
           result: sigResult,
           pips,
           updatedAt: serverTimestamp(),
         });
         batch.update(doc(db, 'vipSignalsPrivate', id), {
+          direction: sigDirection,
+          orderType: sigOrderType,
           entry: entryNum,
           tp: tpNum,
           extraTp: extraTpNum,
@@ -688,8 +731,8 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
           id,
           date: clampStr(sigDate, 40),
           currency: 'XAUUSD',
-          direction: sigDirection,
-          orderType: sigOrderType,
+          direction: 'LOCKED',
+          orderType: 'LOCKED',
           result: sigResult,
           pips,
           createdAt: serverTimestamp(),
@@ -698,6 +741,8 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
         batch.set(doc(db, 'vipSignalsPrivate', id), {
           id,
           currency: 'XAUUSD',
+          direction: sigDirection,
+          orderType: sigOrderType,
           entry: entryNum,
           tp: tpNum,
           extraTp: extraTpNum,
@@ -706,9 +751,33 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         });
+        const notifId = sanitizeId(`notif_sig_${Date.now()}`);
+        batch.set(doc(db, 'notifications', notifId), {
+          id: notifId,
+          targetUid: 'ALL',
+          title: 'New XAUUSD VIP Signal Published',
+          message: 'A new XAUUSD setup is live in the VIP Signals Terminal.',
+          icon: 'bell',
+          buttonText: 'Open VIP Signals',
+          buttonUrl: './index.html#signals',
+          active: true,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
       }
 
       await batch.commit();
+
+      if (isCreatingNew) {
+        void dispatchAdminWebPush({
+          targetUid: 'ALL',
+          title: 'New XAUUSD VIP Signal Published',
+          message: 'A new XAUUSD setup is live in the VIP Signals Terminal.',
+          url: './index.html#signals',
+          tag: id,
+        });
+      }
+
       setEditingSignalId(null);
       setSigEntry('');
       setSigTp('');
@@ -717,7 +786,7 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
       setSigNote('');
       setSigResult('ACTIVE');
       setSigClosedPips('0');
-      showToast('ok', editingSignalId ? 'Signal updated.' : 'New XAUUSD VIP signal published.');
+      showToast('ok', isCreatingNew ? 'New XAUUSD VIP signal published.' : 'Signal updated.');
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, 'vipSignalsPublic');
     }
@@ -737,12 +806,14 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
     }
 
     const priv = privSignals[sig.id];
+    const resolvedDirection: SignalDirection =
+      priv?.direction || (sig.direction !== 'LOCKED' ? sig.direction : 'BUY');
     const pips =
       outcome === 'CLOSED'
         ? Math.round(Number(explicitClosedPips) || 0)
         : priv
         ? calculateSignalPips({
-            direction: sig.direction,
+            direction: resolvedDirection,
             entry: priv.entry,
             tp: priv.tp,
             sl: priv.sl,
@@ -759,6 +830,15 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
         pips,
         updatedAt: serverTimestamp(),
       });
+      if (outcome !== 'ACTIVE') {
+        void dispatchAdminWebPush({
+          targetUid: 'ALL',
+          title: `XAUUSD Signal Update · ${outcome}`,
+          message: `A published XAUUSD VIP trade has settled (${outcome}).`,
+          url: './index.html#signals',
+          tag: `outcome_${sig.id}`,
+        });
+      }
       showToast(
         'ok',
         `Marked signal as ${outcome} (${pips > 0 ? '+' : ''}${pips} pips).`
@@ -826,27 +906,40 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
         }
       }
 
+      const notifTitleText = decision === 'APPROVED' ? 'VIP Access Approved' : 'VIP Request Update';
+      const notifBodyText =
+        decision === 'APPROVED'
+          ? req.method === 'EXNESS'
+            ? 'Your Exness Lifetime VIP access is now active. Open VIP Signals to view full XAUUSD setups.'
+            : req.method === 'BINANCE'
+            ? 'Your Binance 30-day Monthly VIP access is now active. Open VIP Signals to view full XAUUSD setups.'
+            : 'Your access request is now approved and active. Open VIP Signals to view full XAUUSD setups.'
+          : 'Your VIP verification request could not be confirmed. Contact our Telegram desk for assistance.';
+      const notifUrlText = decision === 'APPROVED' ? './index.html#signals' : './contact.html';
+
       // Send targeted Apple-style notification to user
       const notifId = sanitizeId(`notif_vip_${Date.now()}`);
       batch.set(doc(db, 'notifications', notifId), {
         id: notifId,
         targetUid: req.userId,
-        title: decision === 'APPROVED' ? 'VIP Access Approved' : 'VIP Request Update',
-        message:
-          decision === 'APPROVED'
-            ? req.method === 'EXNESS'
-              ? 'Your Exness Lifetime VIP access is now active. Open VIP Signals to view full XAUUSD setups.'
-              : 'Your Binance 30-day Monthly VIP access is now active. Open VIP Signals to view full XAUUSD setups.'
-            : 'Your VIP verification request could not be confirmed. Contact our Telegram desk for assistance.',
+        title: notifTitleText,
+        message: notifBodyText,
         icon: 'crown',
         buttonText: decision === 'APPROVED' ? 'Open VIP Signals' : 'Contact Support',
-        buttonUrl: decision === 'APPROVED' ? './index.html#signals' : './contact.html',
+        buttonUrl: notifUrlText,
         active: true,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
 
       await batch.commit();
+      void dispatchAdminWebPush({
+        targetUid: req.userId,
+        title: notifTitleText,
+        message: notifBodyText,
+        url: notifUrlText,
+        tag: notifId,
+      });
       showToast('ok', `${req.method} VIP request ${decision.toLowerCase()} and member notified.`);
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `vipRequests/${req.id}`);
@@ -885,15 +978,19 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
         batch.update(accessRef, { status: 'REVOKED', updatedAt: serverTimestamp() });
       }
 
+      const bookNotifTitle =
+        decision === 'APPROVED' ? 'Digital Book Unlocked' : 'Book Payment Update';
+      const bookNotifMsg =
+        decision === 'APPROVED'
+          ? `"${pur.bookName}" is now unlocked for download in Paid PDFs.`
+          : `Your payment submission for "${pur.bookName}" could not be verified.`;
+
       const notifId = sanitizeId(`notif_bk_${Date.now()}`);
       batch.set(doc(db, 'notifications', notifId), {
         id: notifId,
         targetUid: pur.userId,
-        title: decision === 'APPROVED' ? 'Digital Book Unlocked' : 'Book Payment Update',
-        message:
-          decision === 'APPROVED'
-            ? `"${pur.bookName}" is now unlocked for download in Paid PDFs.`
-            : `Your payment submission for "${pur.bookName}" could not be verified.`,
+        title: bookNotifTitle,
+        message: bookNotifMsg,
         icon: 'book',
         buttonText: 'Open Bookstore',
         buttonUrl: './index.html#paid-pdfs',
@@ -903,6 +1000,13 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
       });
 
       await batch.commit();
+      void dispatchAdminWebPush({
+        targetUid: pur.userId,
+        title: bookNotifTitle,
+        message: bookNotifMsg,
+        url: './index.html#paid-pdfs',
+        tag: notifId,
+      });
       showToast('ok', `Book purchase marked ${decision.toLowerCase()}.`);
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `bookPurchases/${pur.id}`);
@@ -1108,6 +1212,7 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
       const payload = {
         siteName: clampStr(draftSettings.siteName, 120, 'Trade With Amith'),
         logoUrl: clampStr(draftSettings.logoUrl, 500, ASSETS.brandEmblem),
+        heroVideoUrl: clampStr(draftSettings.heroVideoUrl, 1000),
         heroSubtitle: clampStr(draftSettings.heroSubtitle, 300),
         msnrDescription: clampStr(draftSettings.msnrDescription, 1500),
         winRate: clampStr(tradingStats.winRateFormatted, 30, '0%'),
@@ -1741,6 +1846,10 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
                   .filter((s) => !LEGACY_DEMO_SIGNAL_IDS.has(s.id))
                   .map((s) => {
                     const priv = privSignals[s.id];
+                    const resolvedDir: SignalDirection =
+                      priv?.direction || (s.direction !== 'LOCKED' ? s.direction : 'BUY');
+                    const resolvedOrder: SignalOrderType =
+                      priv?.orderType || (s.orderType !== 'LOCKED' ? s.orderType : 'LIMIT');
                     return (
                       <div
                         key={s.id}
@@ -1753,10 +1862,10 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
                             </span>
                             <span
                               className={`font-semibold ${
-                                s.direction === 'BUY' ? 'text-[#30D158]' : 'text-[#FF453A]'
+                                resolvedDir === 'BUY' ? 'text-[#30D158]' : 'text-[#FF453A]'
                               }`}
                             >
-                              {s.direction} {s.orderType}
+                              {resolvedDir} {resolvedOrder}
                             </span>
                             <span className="text-[#8E8E93]">· {s.date} · {s.result}</span>
                           </div>
@@ -1795,8 +1904,8 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
                             onClick={() => {
                               setEditingSignalId(s.id);
                               setSigDate(s.date);
-                              setSigDirection(s.direction);
-                              setSigOrderType(s.orderType);
+                              setSigDirection(resolvedDir);
+                              setSigOrderType(resolvedOrder);
                               setSigResult(s.result);
                               setSigClosedPips(String(s.pips || 0));
                               if (priv) {
@@ -1816,7 +1925,7 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
                             onClick={() =>
                               setConfirmAction({
                                 title: 'Delete VIP Signal?',
-                                description: `Permanently delete ${s.currency} ${s.direction} signal (${s.date})?`,
+                                description: `Permanently delete ${s.currency} ${resolvedDir} signal (${s.date})?`,
                                 onConfirm: async () => {
                                   const b = writeBatch(db);
                                   b.delete(doc(db, 'vipSignalsPublic', s.id));
@@ -3427,23 +3536,33 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
               onSubmit={async (e) => {
                 e.preventDefault();
                 const id = sanitizeId(`notif_${Date.now()}`);
+                const cleanTitle = clampStr(notifTitle, 120);
+                const cleanMsg = clampStr(notifMsg, 500);
+                const cleanUrl = clampStr(notifBtnUrl, 500);
                 await setDoc(doc(db, 'notifications', id), {
                   id,
                   targetUid: 'ALL',
-                  title: clampStr(notifTitle, 120),
-                  message: clampStr(notifMsg, 500),
+                  title: cleanTitle,
+                  message: cleanMsg,
                   icon: 'bell',
                   buttonText: clampStr(notifBtnText, 60),
-                  buttonUrl: clampStr(notifBtnUrl, 500),
+                  buttonUrl: cleanUrl,
                   active: true,
                   createdAt: serverTimestamp(),
                   updatedAt: serverTimestamp(),
+                });
+                void dispatchAdminWebPush({
+                  targetUid: 'ALL',
+                  title: cleanTitle,
+                  message: cleanMsg,
+                  url: cleanUrl || './index.html',
+                  tag: id,
                 });
                 setNotifTitle('');
                 setNotifMsg('');
                 setNotifBtnText('');
                 setNotifBtnUrl('');
-                showToast('ok', 'Broadcast notification published.');
+                showToast('ok', 'Broadcast notification & background push sent.');
               }}
               className="apple-surface rounded-2xl p-5 grid grid-cols-1 sm:grid-cols-2 gap-4"
             >
@@ -3648,6 +3767,57 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
                       />
                     </label>
                   </div>
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs text-[#A1A1AA] mb-1">
+                  Hero Showcase Video URL / Upload (Replaces Homepage Rectangular Image · Autoplays in Continuous Loop)
+                </label>
+                <div className="flex flex-wrap sm:flex-nowrap gap-2">
+                  <input
+                    type="text"
+                    placeholder="Direct .mp4/.webm URL, uploaded video, or YouTube/Vimeo link (leave empty for default image)"
+                    value={draftSettings.heroVideoUrl || ''}
+                    onChange={(e) =>
+                      setDraftSettings({ ...draftSettings, heroVideoUrl: e.target.value })
+                    }
+                    className="flex-1 min-w-0 px-3.5 py-2 rounded-xl bg-white/[0.04] border border-white/10 text-sm"
+                  />
+                  <label className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-xs font-semibold cursor-pointer inline-flex items-center gap-1.5 whitespace-nowrap">
+                    {uploadingField === 'hero' ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>Uploading...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Upload className="w-3.5 h-3.5" />
+                        <span>Upload Video</span>
+                      </>
+                    )}
+                    <input
+                      type="file"
+                      accept="video/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) {
+                          handleStorageUpload(f, 'hero', (url) =>
+                            setDraftSettings((s) => ({ ...s, heroVideoUrl: url }))
+                          );
+                        }
+                      }}
+                    />
+                  </label>
+                  {draftSettings.heroVideoUrl && (
+                    <button
+                      type="button"
+                      onClick={() => setDraftSettings({ ...draftSettings, heroVideoUrl: '' })}
+                      className="px-3 py-2 rounded-xl bg-[#FF453A]/15 hover:bg-[#FF453A]/25 text-[#FF453A] text-xs font-semibold whitespace-nowrap"
+                    >
+                      Clear
+                    </button>
+                  )}
                 </div>
               </div>
               <div>
@@ -4068,7 +4238,12 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
           >
             <div className="flex items-center justify-between">
               <h3 className="text-base font-semibold text-[#F5F5F7]">
-                Close Signal ({closingSignalModal.signal.currency} {closingSignalModal.signal.direction})
+                Close Signal ({closingSignalModal.signal.currency}{' '}
+                {privSignals[closingSignalModal.signal.id]?.direction ||
+                  (closingSignalModal.signal.direction !== 'LOCKED'
+                    ? closingSignalModal.signal.direction
+                    : '')}
+                )
               </h3>
               <button
                 type="button"

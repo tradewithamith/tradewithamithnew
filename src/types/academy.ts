@@ -19,7 +19,9 @@ export type WindowId = 'home' | 'signals' | 'market-analysis' | 'videos' | 'free
 export type StaticPageId = 'workspace' | 'terms' | 'privacy' | 'about' | 'contact' | 'admin';
 
 export type SignalDirection = 'BUY' | 'SELL';
+export type PublicSignalDirection = SignalDirection | 'LOCKED';
 export type SignalOrderType = 'LIMIT' | 'MARKET';
+export type PublicSignalOrderType = SignalOrderType | 'LOCKED';
 export type SignalResult = 'ACTIVE' | 'TP HIT' | 'SL HIT' | 'CLOSED';
 
 export type VipType = 'NONE' | 'LIFETIME' | 'MONTHLY' | 'CUSTOM';
@@ -51,8 +53,8 @@ export interface VipSignalPublic {
   id: string;
   date: string;
   currency: 'XAUUSD';
-  direction: SignalDirection;
-  orderType: SignalOrderType;
+  direction: PublicSignalDirection;
+  orderType: PublicSignalOrderType;
   result: SignalResult;
   pips: number;
   createdAtMs: number;
@@ -61,6 +63,8 @@ export interface VipSignalPublic {
 export interface VipSignalPrivate {
   id: string;
   currency: 'XAUUSD';
+  direction?: SignalDirection;
+  orderType?: SignalOrderType;
   entry: number;
   tp: number;
   extraTp: number;
@@ -210,6 +214,7 @@ export interface TradingPerformanceStats {
 export interface AcademySettings {
   siteName: string;
   logoUrl: string;
+  heroVideoUrl?: string;
   heroSubtitle: string;
   msnrDescription: string;
   winRate: string;
@@ -246,6 +251,7 @@ export interface AcademySettings {
 export const DEFAULT_SETTINGS: AcademySettings = {
   siteName: 'Trade With Amith',
   logoUrl: ASSETS.brandEmblem,
+  heroVideoUrl: '',
   heroSubtitle: 'Malaysian Support & Resistance · MSNR Trading Education & XAUUSD Analysis',
   msnrDescription:
     'Precision institutional gold trading built on unmitigated Malaysian Support & Resistance (MSNR) roadblocks, multi-timeframe storyline alignment, and disciplined London and New York execution.',

@@ -103,8 +103,8 @@ service cloud.firestore {
         isValidId(data.id) &&
         data.date is string && data.date.size() >= 1 && data.date.size() <= 40 &&
         data.currency is string && data.currency.size() <= 20 && data.currency == 'XAUUSD' &&
-        data.direction is string && data.direction.size() <= 10 && data.direction in ['BUY', 'SELL'] &&
-        data.orderType is string && data.orderType.size() <= 10 && data.orderType in ['LIMIT', 'MARKET'] &&
+        data.direction is string && data.direction.size() <= 10 && data.direction in ['BUY', 'SELL', 'LOCKED'] &&
+        data.orderType is string && data.orderType.size() <= 10 && data.orderType in ['LIMIT', 'MARKET', 'LOCKED'] &&
         data.result is string && data.result.size() <= 15 && data.result in ['ACTIVE', 'TP HIT', 'SL HIT', 'CLOSED'] &&
         data.pips is number &&
         data.createdAt is timestamp &&
@@ -113,9 +113,11 @@ service cloud.firestore {
 
     function isValidVipSignalPrivate(data) {
       return data.keys().hasAll(['id', 'currency', 'entry', 'tp', 'extraTp', 'sl', 'note', 'createdAt', 'updatedAt']) &&
-        data.keys().hasOnly(['id', 'currency', 'entry', 'tp', 'extraTp', 'sl', 'note', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'currency', 'direction', 'orderType', 'entry', 'tp', 'extraTp', 'sl', 'note', 'createdAt', 'updatedAt']) &&
         isValidId(data.id) &&
         data.currency is string && data.currency.size() <= 20 && data.currency == 'XAUUSD' &&
+        (!('direction' in data) || (data.direction is string && data.direction.size() <= 10 && data.direction in ['BUY', 'SELL'])) &&
+        (!('orderType' in data) || (data.orderType is string && data.orderType.size() <= 10 && data.orderType in ['LIMIT', 'MARKET'])) &&
         data.entry is number &&
         data.tp is number &&
         data.extraTp is number &&
@@ -274,7 +276,7 @@ service cloud.firestore {
           'onboardingNotifMessage', 'updatedAt'
         ]) &&
         data.keys().hasOnly([
-          'siteName', 'logoUrl', 'heroSubtitle', 'msnrDescription', 'winRate',
+          'siteName', 'logoUrl', 'heroVideoUrl', 'heroSubtitle', 'msnrDescription', 'winRate',
           'subscriberCountFallback', 'youtubeChannelId', 'youtubeChannelUrl',
           'youtubeGateEnabled', 'pipMultiplier', 'binancePayId', 'binanceQrUrl',
           'binanceLogoUrl', 'vipMonthlyPrice', 'exnessReferralUrl', 'exnessMinDeposit',
@@ -287,6 +289,7 @@ service cloud.firestore {
         ]) &&
         data.siteName is string && data.siteName.size() <= 120 &&
         data.logoUrl is string && data.logoUrl.size() <= 500 &&
+        (!('heroVideoUrl' in data) || (data.heroVideoUrl is string && data.heroVideoUrl.size() <= 1000)) &&
         data.heroSubtitle is string && data.heroSubtitle.size() <= 300 &&
         data.msnrDescription is string && data.msnrDescription.size() <= 1500 &&
         data.winRate is string && data.winRate.size() <= 30 &&
@@ -342,6 +345,45 @@ service cloud.firestore {
         data.monthCount is number && data.monthCount >= 0 &&
         data.totalCount is number && data.totalCount >= 0 &&
         data.lastSessionId is string && data.lastSessionId.size() >= 3 && data.lastSessionId.size() <= 160 &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidPushVapidConfig(data) {
+      return data.keys().hasAll(['publicKey', 'privateKey', 'subject', 'updatedAt']) &&
+        data.keys().hasOnly(['publicKey', 'privateKey', 'subject', 'updatedAt']) &&
+        data.publicKey is string && data.publicKey.size() >= 40 && data.publicKey.size() <= 200 &&
+        data.privateKey is string && data.privateKey.size() >= 20 && data.privateKey.size() <= 200 &&
+        data.subject is string && data.subject.size() >= 5 && data.subject.size() <= 200 &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidPushPublicConfig(data) {
+      return data.keys().hasAll(['publicKey', 'updatedAt']) &&
+        data.keys().hasOnly(['publicKey', 'updatedAt']) &&
+        data.publicKey is string && data.publicKey.size() >= 40 && data.publicKey.size() <= 200 &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidYoutubeLiveStats(data) {
+      return data.keys().hasAll(['channelId', 'subscriberCount', 'updatedAt']) &&
+        data.keys().hasOnly(['channelId', 'subscriberCount', 'updatedAt']) &&
+        data.channelId is string && data.channelId.size() >= 5 && data.channelId.size() <= 80 &&
+        data.subscriberCount is string && data.subscriberCount.size() >= 1 && data.subscriberCount.size() <= 40 &&
+        data.subscriberCount.matches('^[0-9][0-9,.]*[KMB]?$') &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidPushSubscriptionRecord(data) {
+      return data.keys().hasAll(['id', 'userId', 'endpoint', 'p256dh', 'auth', 'active', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'userId', 'endpoint', 'p256dh', 'auth', 'active', 'createdAt', 'updatedAt']) &&
+        isValidId(data.id) &&
+        isValidId(data.userId) &&
+        data.endpoint is string && data.endpoint.size() >= 12 && data.endpoint.size() <= 1500 &&
+        data.endpoint.matches('^https://.*') &&
+        data.p256dh is string && data.p256dh.size() >= 10 && data.p256dh.size() <= 256 &&
+        data.auth is string && data.auth.size() >= 6 && data.auth.size() <= 128 &&
+        data.active is bool &&
+        data.createdAt is timestamp &&
         data.updatedAt is timestamp;
     }
 
@@ -424,7 +466,7 @@ service cloud.firestore {
         incoming().id == existing().id &&
         incoming().createdAt == existing().createdAt &&
         incoming().updatedAt == request.time &&
-        incoming().diff(existing()).affectedKeys().hasOnly(['entry', 'tp', 'extraTp', 'sl', 'note', 'updatedAt']);
+        incoming().diff(existing()).affectedKeys().hasOnly(['direction', 'orderType', 'entry', 'tp', 'extraTp', 'sl', 'note', 'updatedAt']);
       allow delete: if isAdmin() && isValidId(signalId);
     }
 
@@ -700,6 +742,69 @@ service cloud.firestore {
           )
         );
       allow delete: if false;
+    }
+
+    match /pushConfig/{configId} {
+      allow get: if isAdmin() && configId == 'vapid';
+      allow list: if false;
+      allow create: if isAdmin() && configId == 'vapid' && isValidPushVapidConfig(incoming()) &&
+        incoming().updatedAt == request.time;
+      allow update: if isAdmin() && configId == 'vapid' && isValidPushVapidConfig(incoming()) &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['publicKey', 'privateKey', 'subject', 'updatedAt']);
+      allow delete: if false;
+    }
+
+    match /pushPublic/{docId} {
+      allow get: if docId == 'vapid';
+      allow list: if false;
+      allow create: if isAdmin() && docId == 'vapid' && isValidPushPublicConfig(incoming()) &&
+        incoming().updatedAt == request.time;
+      allow update: if isAdmin() && docId == 'vapid' && isValidPushPublicConfig(incoming()) &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['publicKey', 'updatedAt']);
+      allow delete: if false;
+    }
+
+    match /youtubeStats/{docId} {
+      allow get: if docId == 'live';
+      allow list: if false;
+      allow create: if isVerifiedUser() && docId == 'live' && isValidYoutubeLiveStats(incoming()) &&
+        incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser() && docId == 'live' && isValidYoutubeLiveStats(incoming()) &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['channelId', 'subscriberCount', 'updatedAt']);
+      allow delete: if isAdmin() && docId == 'live';
+    }
+
+    match /pushSubscriptions/{subId} {
+      allow get: if isSignedIn() && isValidId(subId) && (
+        isAdmin() ||
+        (resource == null && isVerifiedUser()) ||
+        (resource != null && existing().userId == request.auth.uid)
+      );
+      allow list: if isBootstrappedAdmin();
+      allow create: if isVerifiedUser() && isValidId(subId) && isValidPushSubscriptionRecord(incoming()) &&
+        incoming().id == subId &&
+        incoming().userId == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser() && isValidId(subId) && isValidPushSubscriptionRecord(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (
+          isAdmin() ||
+          (
+            existing().userId == request.auth.uid &&
+            incoming().userId == existing().userId &&
+            incoming().diff(existing()).affectedKeys().hasOnly(['endpoint', 'p256dh', 'auth', 'active', 'updatedAt'])
+          )
+        );
+      allow delete: if isValidId(subId) && (
+        isAdmin() ||
+        (isVerifiedUser() && resource != null && existing().userId == request.auth.uid)
+      );
     }
   }
 }

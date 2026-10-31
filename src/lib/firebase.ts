@@ -49,13 +49,56 @@ export const SCOPES = [
   'https://www.googleapis.com/auth/spreadsheets.readonly',
 ];
 
+const YT_OAUTH_STORAGE_KEY = 'msnr_yt_oauth_v2';
 let cachedAccessToken: string | null = null;
 let isSigningIn = false;
 let activeSignInPromise: Promise<{ user: User; accessToken: string | null }> | null = null;
 
+function saveYoutubeAccessToken(uid: string, token: string) {
+  try {
+    const payload = {
+      uid,
+      token,
+      expiresAt: Date.now() + 52 * 60_000, // ~52 minutes (Google OAuth token TTL is 60 min)
+    };
+    localStorage.setItem(YT_OAUTH_STORAGE_KEY, JSON.stringify(payload));
+  } catch {
+    // Ignore storage quota errors
+  }
+}
+
+export function getValidYoutubeAccessToken(expectedUid?: string | null): string | null {
+  try {
+    const raw = localStorage.getItem(YT_OAUTH_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as { uid?: string; token?: string; expiresAt?: number };
+      if (
+        parsed?.token &&
+        typeof parsed.expiresAt === 'number' &&
+        parsed.expiresAt > Date.now() &&
+        (!expectedUid || !parsed.uid || parsed.uid === expectedUid)
+      ) {
+        return parsed.token;
+      }
+    }
+  } catch {
+    // Ignore invalid JSON
+  }
+  return cachedAccessToken;
+}
+
+export function clearYoutubeAccessToken(): void {
+  try {
+    localStorage.removeItem(YT_OAUTH_STORAGE_KEY);
+  } catch {
+    // Ignore
+  }
+}
+
 onAuthStateChanged(auth, (user) => {
   if (!user && !isSigningIn) {
     cachedAccessToken = null;
+    clearYoutubeAccessToken();
   }
 });
 
@@ -164,6 +207,9 @@ export async function signInWithGoogle(options?: {
       const credential = GoogleAuthProvider.credentialFromResult(result);
       if (credential?.accessToken) {
         cachedAccessToken = credential.accessToken;
+        if (options?.includeYoutubeScope) {
+          saveYoutubeAccessToken(result.user.uid, credential.accessToken);
+        }
       }
       return { user: result.user, accessToken: cachedAccessToken };
     } finally {
@@ -179,6 +225,13 @@ export async function signInWithGoogleRedirect(options?: {
   includeYoutubeScope?: boolean;
   includeSheetsScope?: boolean;
 }): Promise<void> {
+  if (options?.includeYoutubeScope) {
+    try {
+      sessionStorage.setItem('msnr_pending_yt_redirect', '1');
+    } catch {
+      // Ignore
+    }
+  }
   const provider = buildGoogleProvider(options);
   await signInWithRedirect(auth, provider, browserPopupRedirectResolver);
 }
@@ -190,6 +243,10 @@ export async function consumeRedirectResult(): Promise<void> {
       const credential = GoogleAuthProvider.credentialFromResult(result);
       if (credential?.accessToken) {
         cachedAccessToken = credential.accessToken;
+        if (sessionStorage.getItem('msnr_pending_yt_redirect') === '1') {
+          saveYoutubeAccessToken(result.user.uid, credential.accessToken);
+          sessionStorage.removeItem('msnr_pending_yt_redirect');
+        }
       }
     }
   } catch (err) {
@@ -286,6 +343,7 @@ export function getAccessToken(): string | null {
 
 export async function logoutUser(): Promise<void> {
   cachedAccessToken = null;
+  clearYoutubeAccessToken();
   await auth.signOut();
 }
 

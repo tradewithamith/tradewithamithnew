@@ -16,9 +16,11 @@ import {
 import {
   auth,
   clampStr,
+  clearYoutubeAccessToken,
   computeTradingPerformanceStats,
   consumeRedirectResult,
   db,
+  getValidYoutubeAccessToken,
   handleFirestoreError,
   isBootstrappedAdminEmail,
   logoutUser,
@@ -36,6 +38,7 @@ import {
   verifyYoutubeSubscription,
   type YoutubeCheckResult,
 } from '../lib/integrations';
+import { syncExistingPushSubscription } from '../lib/pushNotifications';
 import {
   DEFAULT_SETTINGS,
   LEGACY_DEMO_FREE_BOOK_IDS,
@@ -77,6 +80,7 @@ interface AcademyContextValue {
   vipGrant: VipGrant | null;
   isAdmin: boolean;
   isVipActive: boolean;
+  hasPendingVipRequest: boolean;
   settings: AcademySettings;
   subscriberCount: string;
   signals: MergedSignal[];
@@ -154,9 +158,9 @@ export const AcademyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     };
   });
 
-  const [gateVerified, setGateVerified] = useState<boolean>(() => {
-    return localStorage.getItem('msnr_yt_verified_v1') === 'true';
-  });
+  const [hasPendingVipRequestDb, setHasPendingVipRequestDb] = useState(false);
+
+  const [gateVerified, setGateVerified] = useState<boolean>(false);
   const [gateMessage, setGateMessage] = useState<string | null>(null);
   const [gateBusy, setGateBusy] = useState(false);
 
@@ -178,27 +182,39 @@ export const AcademyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return false;
   }, [isAdmin, vipGrant]);
 
+  const hasPendingVipRequest = useMemo(() => {
+    if (isVipActive) return false;
+    return hasPendingVipRequestDb || vipGrant?.approvalStatus === 'PENDING';
+  }, [isVipActive, hasPendingVipRequestDb, vipGrant]);
+
   // 1. Auth Listener & Automatic Profile Provisioning
   useEffect(() => {
     void consumeRedirectResult();
+    try {
+      localStorage.removeItem('msnr_yt_verified_v1');
+    } catch {
+      // Ignore storage errors
+    }
 
     const unsub = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
       setAuthReady(true);
+      void syncExistingPushSubscription(currentUser?.uid || null);
 
       if (!currentUser) {
         setProfile(null);
         setVipGrant(null);
         setIsDbAdmin(false);
+        setHasPendingVipRequestDb(false);
         setSignalsPrivateMap({});
         setBookAccessMap({});
         setPersonalNotifs([]);
+        setGateVerified(false);
         return;
       }
 
       if (isBootstrappedAdminEmail(currentUser.email)) {
         setGateVerified(true);
-        localStorage.setItem('msnr_yt_verified_v1', 'true');
       }
 
       // Ensure user profile exists in Firestore
@@ -211,7 +227,7 @@ export const AcademyProvider: React.FC<{ children: React.ReactNode }> = ({ child
             name: clampStr(currentUser.displayName || currentUser.email.split('@')[0], 100, 'Member'),
             email: clampStr(currentUser.email, 256),
             telegram: '',
-            youtubeVerified: localStorage.getItem('msnr_yt_verified_v1') === 'true',
+            youtubeVerified: false,
             createdAt: serverTimestamp(),
             updatedAt: serverTimestamp(),
           };
@@ -228,6 +244,81 @@ export const AcademyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     });
     return () => unsub();
   }, []);
+
+  // Re-verify YouTube channel subscription on every website revisit & tab return
+  useEffect(() => {
+    if (!authReady) return;
+    let cancelled = false;
+    let lastCheckedAt = 0;
+
+    const runSubscriptionRevisitCheck = async () => {
+      if (cancelled) return;
+
+      if (!settings.youtubeGateEnabled || isBootstrappedAdmin) {
+        setGateVerified(true);
+        setGateMessage(null);
+        return;
+      }
+
+      if (!user) {
+        setGateVerified(false);
+        return;
+      }
+
+      const token = getValidYoutubeAccessToken(user.uid);
+      if (!token) {
+        if (sessionStorage.getItem('msnr_yt_session_bypass') === '1') {
+          setGateVerified(true);
+        } else {
+          setGateVerified(false);
+        }
+        return;
+      }
+
+      lastCheckedAt = Date.now();
+      const check = await verifyYoutubeSubscription(settings.youtubeChannelId, token);
+      if (cancelled) return;
+
+      if (check.status === 'SUBSCRIBED' || check.status === 'UNCONFIGURED') {
+        setGateVerified(true);
+        setGateMessage(null);
+      } else if (check.status === 'NOT_SUBSCRIBED') {
+        sessionStorage.removeItem('msnr_yt_session_bypass');
+        setGateVerified(false);
+        setGateMessage(check.message);
+        if (user.emailVerified) {
+          updateDoc(doc(db, 'users', user.uid), {
+            youtubeVerified: false,
+            updatedAt: serverTimestamp(),
+          }).catch(() => {});
+        }
+      } else if (check.status === 'TOKEN_EXPIRED') {
+        clearYoutubeAccessToken();
+        setGateVerified(false);
+      } else if (check.status === 'API_LIMITED') {
+        if (sessionStorage.getItem('msnr_yt_session_bypass') === '1') {
+          setGateVerified(true);
+        }
+      }
+    };
+
+    void runSubscriptionRevisitCheck();
+
+    const handleVisibilityOrFocus = () => {
+      if (document.visibilityState === 'visible' && Date.now() - lastCheckedAt > 15_000) {
+        void runSubscriptionRevisitCheck();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+    window.addEventListener('focus', handleVisibilityOrFocus);
+
+    return () => {
+      cancelled = true;
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+    };
+  }, [authReady, user, settings.youtubeGateEnabled, settings.youtubeChannelId, isBootstrappedAdmin]);
 
   // Sync browser favicon across all pages if Admin uploads a custom logo
   useEffect(() => {
@@ -272,6 +363,7 @@ export const AcademyProvider: React.FC<{ children: React.ReactNode }> = ({ child
           } else {
             merged.binanceQrUrl = resolveAsset(merged.binanceQrUrl);
           }
+          merged.heroVideoUrl = resolveAsset(data.heroVideoUrl || '');
           const validYtId = normalizeYoutubeChannelId(data.youtubeChannelId || '');
           merged.youtubeChannelId = validYtId || DEFAULT_SETTINGS.youtubeChannelId;
           if (
@@ -391,13 +483,23 @@ export const AcademyProvider: React.FC<{ children: React.ReactNode }> = ({ child
         if (snap.exists()) {
           const data = snap.data() as UserProfile;
           setProfile(data);
-          if (data.youtubeVerified) {
-            setGateVerified(true);
-            localStorage.setItem('msnr_yt_verified_v1', 'true');
-          }
         }
       },
       (error) => handleFirestoreError(error, OperationType.GET, `users/${user.uid}`)
+    );
+
+    const myVipReqQ = query(collection(db, 'vipRequests'), where('userId', '==', user.uid));
+    const unsubMyVipReqs = onSnapshot(
+      myVipReqQ,
+      (snap) => {
+        let pending = false;
+        snap.forEach((d) => {
+          const r = d.data() as { status?: string };
+          if (r.status === 'PENDING') pending = true;
+        });
+        setHasPendingVipRequestDb(pending);
+      },
+      () => setHasPendingVipRequestDb(false)
     );
 
     const unsubVip = onSnapshot(
@@ -472,6 +574,7 @@ export const AcademyProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     return () => {
       unsubProfile();
+      unsubMyVipReqs();
       unsubVip();
       unsubAdmin();
       unsubAccess();
@@ -705,6 +808,8 @@ export const AcademyProvider: React.FC<{ children: React.ReactNode }> = ({ child
               {
                 id: sig.id,
                 currency: 'XAUUSD' as const,
+                direction: d.direction,
+                orderType: d.orderType,
                 entry: d.entry,
                 tp: d.tp,
                 extraTp: d.extraTp,
@@ -734,8 +839,26 @@ export const AcademyProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const signals: MergedSignal[] = useMemo(() => {
     return activeSignalsSource.map((pub) => {
-      const priv = isVipActive ? signalsPrivateMap[pub.id] : undefined;
-      return priv ? { ...pub, ...priv } : pub;
+      if (!isVipActive) {
+        return {
+          ...pub,
+          direction: 'LOCKED',
+          orderType: 'LOCKED',
+          entry: undefined,
+          tp: undefined,
+          extraTp: undefined,
+          sl: undefined,
+          note: undefined,
+        };
+      }
+      const priv = signalsPrivateMap[pub.id];
+      if (!priv) return pub;
+      return {
+        ...pub,
+        ...priv,
+        direction: priv.direction || pub.direction,
+        orderType: priv.orderType || pub.orderType,
+      };
     });
   }, [activeSignalsSource, isVipActive, signalsPrivateMap]);
 
@@ -815,7 +938,6 @@ export const AcademyProvider: React.FC<{ children: React.ReactNode }> = ({ child
         isBootstrappedAdminEmail(signedInUser.email)
       ) {
         setGateVerified(true);
-        localStorage.setItem('msnr_yt_verified_v1', 'true');
         if (signedInUser.emailVerified && signedInUser.email) {
           const userRef = doc(db, 'users', signedInUser.uid);
           const snap = await getDoc(userRef);
@@ -837,7 +959,14 @@ export const AcademyProvider: React.FC<{ children: React.ReactNode }> = ({ child
           }
         }
       } else {
+        setGateVerified(false);
         setGateMessage(check.message);
+        if (check.status === 'NOT_SUBSCRIBED' && signedInUser.emailVerified) {
+          updateDoc(doc(db, 'users', signedInUser.uid), {
+            youtubeVerified: false,
+            updatedAt: serverTimestamp(),
+          }).catch(() => {});
+        }
       }
 
       return check;
@@ -858,7 +987,11 @@ export const AcademyProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const bypassGateForSession = useCallback(() => {
     setGateVerified(true);
-    localStorage.setItem('msnr_yt_verified_v1', 'true');
+    try {
+      sessionStorage.setItem('msnr_yt_session_bypass', '1');
+    } catch {
+      // Ignore
+    }
   }, []);
 
   const submitVipRequest = useCallback(
@@ -1052,6 +1185,7 @@ export const AcademyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     vipGrant,
     isAdmin,
     isVipActive,
+    hasPendingVipRequest,
     settings,
     subscriberCount,
     signals,

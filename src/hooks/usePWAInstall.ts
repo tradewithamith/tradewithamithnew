@@ -42,9 +42,24 @@ export function usePWAInstall() {
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
 
-    // Ensure service worker registration on static hosting environments
-    if ('serviceWorker' in navigator && import.meta.env.PROD) {
-      navigator.serviceWorker.register('/service-worker.js').catch(() => {});
+    // Ensure service worker registration for PWA & background Web Push notifications
+    if ('serviceWorker' in navigator) {
+      if (import.meta.env.PROD) {
+        navigator.serviceWorker
+          .getRegistration()
+          .then((existing) => {
+            if (!existing) {
+              return navigator.serviceWorker
+                .register('./sw.js')
+                .catch(() => navigator.serviceWorker.register('./service-worker.js'));
+            }
+            existing.update().catch(() => {});
+            return existing;
+          })
+          .catch(() => {});
+      } else {
+        navigator.serviceWorker.register('/service-worker.js').catch(() => {});
+      }
     }
 
     return () => {

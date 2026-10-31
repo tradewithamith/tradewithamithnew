@@ -1,4 +1,10 @@
-const CACHE_NAME = 'msnr-academy-v1';
+try {
+  importScripts('./push-handler.js');
+} catch {
+  // Fallback if imported in an environment where push-handler.js isn't preloaded yet
+}
+
+const CACHE_NAME = 'trade-with-amith-v3';
 const PRECACHE_URLS = [
   '/',
   '/index.html',
@@ -6,11 +12,13 @@ const PRECACHE_URLS = [
   '/contact.html',
   '/terms.html',
   '/privacy.html',
-  '/manifest.json',
-  '/icon.svg',
-  '/pwa-192x192.png',
-  '/pwa-512x512.png',
-  '/apple-touch-icon.png'
+  '/manifest.json?v=twa3',
+  '/icon.svg?v=twa3',
+  '/favicon.png?v=twa3',
+  '/pwa-192x192.png?v=twa3',
+  '/pwa-512x512.png?v=twa3',
+  '/pwa-maskable-512x512.png?v=twa3',
+  '/apple-touch-icon.png?v=twa3',
 ];
 
 self.addEventListener('install', (event) => {
@@ -22,9 +30,12 @@ self.addEventListener('install', (event) => {
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key)))
-    ).then(() => self.clients.claim())
+    caches
+      .keys()
+      .then((keys) =>
+        Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key)))
+      )
+      .then(() => self.clients.claim())
   );
 });
 
@@ -32,7 +43,11 @@ self.addEventListener('fetch', (event) => {
   const { request } = event;
   if (request.method !== 'GET') return;
   const url = new URL(request.url);
-  if (url.pathname.startsWith('/api/') || url.hostname.includes('firestore.googleapis.com') || url.hostname.includes('googleapis.com')) {
+  if (
+    url.pathname.startsWith('/api/') ||
+    url.hostname.includes('firestore.googleapis.com') ||
+    url.hostname.includes('googleapis.com')
+  ) {
     return;
   }
   event.respondWith(
