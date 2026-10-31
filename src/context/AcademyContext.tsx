@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useMemo, useState, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { onAuthStateChanged, type User } from 'firebase/auth';
 import {
   collection,
@@ -161,6 +161,16 @@ export const AcademyProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [gateVerified, setGateVerified] = useState<boolean>(false);
   const [gateMessage, setGateMessage] = useState<string | null>(null);
   const [gateBusy, setGateBusy] = useState(false);
+  const gateVerifiedRef = useRef<boolean>(false);
+  const profileYoutubeVerifiedRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    gateVerifiedRef.current = gateVerified;
+  }, [gateVerified]);
+
+  useEffect(() => {
+    profileYoutubeVerifiedRef.current = Boolean(profile?.youtubeVerified);
+  }, [profile?.youtubeVerified]);
 
   const isBootstrappedAdmin =
     !!user && user.emailVerified && isBootstrappedAdminEmail(user.email);
@@ -242,7 +252,7 @@ export const AcademyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return () => unsub();
   }, []);
 
-  // Re-verify YouTube channel subscription on every website revisit & tab return
+  // Re-verify YouTube channel subscription on website revisit & tab return
   useEffect(() => {
     if (!authReady) return;
     let cancelled = false;
@@ -264,7 +274,11 @@ export const AcademyProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
       const token = getValidYoutubeAccessToken(user.uid);
       if (!token) {
-        setGateVerified(false);
+        // Keep active session uninterrupted if user already verified in this browser tab;
+        // on a fresh visit/reload without a valid token they will re-verify.
+        if (!gateVerifiedRef.current) {
+          setGateVerified(false);
+        }
         return;
       }
 
@@ -286,28 +300,35 @@ export const AcademyProvider: React.FC<{ children: React.ReactNode }> = ({ child
         }
       } else if (check.status === 'TOKEN_EXPIRED') {
         clearYoutubeAccessToken();
-        setGateVerified(false);
-      } else if (check.status === 'API_LIMITED') {
-        setGateVerified(false);
-        setGateMessage(check.message);
+        if (!gateVerifiedRef.current) {
+          setGateVerified(false);
+        }
+      } else if (check.status === 'TRANSIENT_ERROR' || check.status === 'API_LIMITED') {
+        // Never kick an already-verified subscriber out of the site due to a temporary
+        // YouTube 500 server glitch or 4G/5G handoff.
+        if (gateVerifiedRef.current || profileYoutubeVerifiedRef.current) {
+          setGateVerified(true);
+          setGateMessage(null);
+        } else {
+          setGateVerified(false);
+          setGateMessage(check.message);
+        }
       }
     };
 
     void runSubscriptionRevisitCheck();
 
-    const handleVisibilityOrFocus = () => {
-      if (document.visibilityState === 'visible' && Date.now() - lastCheckedAt > 15_000) {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && Date.now() - lastCheckedAt > 60_000) {
         void runSubscriptionRevisitCheck();
       }
     };
 
-    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
-    window.addEventListener('focus', handleVisibilityOrFocus);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
       cancelled = true;
-      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
-      window.removeEventListener('focus', handleVisibilityOrFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [authReady, user, settings.youtubeGateEnabled, settings.youtubeChannelId, isBootstrappedAdmin]);
 

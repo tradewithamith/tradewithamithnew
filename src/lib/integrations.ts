@@ -13,6 +13,7 @@ export type YoutubeCheckResult =
   | { status: 'NOT_SUBSCRIBED'; message: string }
   | { status: 'TOKEN_EXPIRED'; message: string }
   | { status: 'UNCONFIGURED'; message: string }
+  | { status: 'TRANSIENT_ERROR'; message: string }
   | { status: 'API_LIMITED'; message: string };
 
 export function normalizeYoutubeChannelId(raw: string): string {
@@ -62,7 +63,7 @@ export function formatTelegramHandle(raw: string): string {
 
 /**
  * Official YouTube Data API v3 Subscription Verification
- * Checks whether the authenticated Google user is subscribed to the configured YouTube Channel ID.
+ * Uses lightweight part=id&maxResults=1 with automatic retry on transient YouTube 5xx errors.
  */
 export async function verifyYoutubeSubscription(
   channelId: string,
@@ -85,50 +86,112 @@ export async function verifyYoutubeSubscription(
     };
   }
 
-  try {
-    const url = `https://www.googleapis.com/youtube/v3/subscriptions?part=snippet&mine=true&forChannelId=${encodeURIComponent(cleanChannelId)}`;
-    const response = await fetch(url, {
-      headers: { Authorization: `Bearer ${token}` },
-      cache: 'no-store',
-    });
+  const url = `https://www.googleapis.com/youtube/v3/subscriptions?part=id&mine=true&forChannelId=${encodeURIComponent(cleanChannelId)}&maxResults=1`;
+  const retryDelaysMs = [0, 700, 1500];
 
-    if (response.status === 200) {
-      const data = (await response.json()) as { items?: unknown[] };
-      if (Array.isArray(data.items) && data.items.length > 0) {
+  for (let attempt = 0; attempt < retryDelaysMs.length; attempt++) {
+    if (retryDelaysMs[attempt] > 0) {
+      await new Promise((resolve) => setTimeout(resolve, retryDelaysMs[attempt]));
+    }
+
+    try {
+      const response = await fetch(url, {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: 'no-store',
+      });
+
+      if (response.status === 200) {
+        const data = (await response.json()) as { items?: unknown[] };
+        if (Array.isArray(data.items) && data.items.length > 0) {
+          return {
+            status: 'SUBSCRIBED',
+            message: 'Subscription verified via YouTube Data API.',
+          };
+        }
         return {
-          status: 'SUBSCRIBED',
-          message: 'Subscription verified via YouTube Data API.',
+          status: 'NOT_SUBSCRIBED',
+          message:
+            'You are not currently subscribed to Trade With Amith on YouTube. Please subscribe first, then click Verify Subscription.',
         };
       }
+
+      if (response.status === 401) {
+        return {
+          status: 'TOKEN_EXPIRED',
+          message:
+            'Your Google YouTube verification session expired. Please verify your subscription again.',
+        };
+      }
+
+      // Transient YouTube backend 5xx or rate-limit 429 — retry before returning TRANSIENT_ERROR
+      if (response.status >= 500 || response.status === 429) {
+        if (attempt < retryDelaysMs.length - 1) {
+          continue;
+        }
+        return {
+          status: 'TRANSIENT_ERROR',
+          message:
+            'YouTube servers experienced a temporary delay while checking your subscription. Please tap Verify Subscription once more.',
+        };
+      }
+
+      const errJson = (await response.json().catch(() => ({}))) as {
+        error?: {
+          message?: string;
+          status?: string;
+          errors?: Array<{ reason?: string }>;
+        };
+      };
+      const apiReason = errJson?.error?.message || `HTTP ${response.status}`;
+      const errorCode = errJson?.error?.errors?.[0]?.reason || '';
+
+      if (response.status === 404 || errorCode === 'subscriberNotFound') {
+        return {
+          status: 'NOT_SUBSCRIBED',
+          message:
+            'No active YouTube subscription was found for this Google account. Please open YouTube, subscribe to @tradewithamithYT, and tap Verify Subscription.',
+        };
+      }
+
+      if (
+        response.status === 403 &&
+        (errorCode === 'insufficientPermissions' ||
+          apiReason.toLowerCase().includes('insufficient authentication scopes'))
+      ) {
+        return {
+          status: 'NOT_SUBSCRIBED',
+          message:
+            'Please allow the YouTube subscription check permission on the Google Sign-In screen to continue.',
+        };
+      }
+
+      if (response.status === 403 && errorCode === 'quotaExceeded') {
+        return {
+          status: 'TRANSIENT_ERROR',
+          message: 'YouTube verification service is temporarily busy. Please try again shortly.',
+        };
+      }
+
       return {
-        status: 'NOT_SUBSCRIBED',
-        message: 'You are not currently subscribed to Trade With Amith on YouTube. Please subscribe first, then click Verify Subscription.',
+        status: 'API_LIMITED',
+        message: `YouTube verification error (${apiReason}). Please try again.`,
+      };
+    } catch {
+      if (attempt < retryDelaysMs.length - 1) {
+        continue;
+      }
+      return {
+        status: 'TRANSIENT_ERROR',
+        message:
+          'Temporary network interruption while checking YouTube. Please check your connection and tap Verify Subscription again.',
       };
     }
-
-    if (response.status === 401) {
-      return {
-        status: 'TOKEN_EXPIRED',
-        message: 'Your Google YouTube verification session expired. Please verify your subscription again.',
-      };
-    }
-
-    const errJson = (await response.json().catch(() => ({}))) as {
-      error?: { message?: string; status?: string };
-    };
-    const apiReason = errJson?.error?.message || `HTTP ${response.status}`;
-
-    return {
-      status: 'API_LIMITED',
-      message: `YouTube API verification notice (${apiReason}). Enable YouTube Data API v3 in Google Cloud Console for strict enforcement.`,
-    };
-  } catch {
-    return {
-      status: 'API_LIMITED',
-      message:
-        'Network or browser privacy settings prevented live YouTube API lookup. Verified Google session recorded.',
-    };
   }
+
+  return {
+    status: 'TRANSIENT_ERROR',
+    message: 'Temporary delay verifying YouTube subscription. Please tap Verify Subscription again.',
+  };
 }
 
 async function syncSubscriberCountToFirestore(channelId: string, count: string): Promise<void> {
