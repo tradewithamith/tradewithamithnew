@@ -1,5 +1,5 @@
 try {
-  importScripts('./push-handler.js');
+  importScripts('/push-handler.js');
 } catch {
   // Fallback if imported in an environment where push-handler.js isn't preloaded yet
 }

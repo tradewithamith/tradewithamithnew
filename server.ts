@@ -13,9 +13,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const ADMIN_EMAILS = new Set([
-  'emoneywithamith@gmail.com',
   'amithmadumal19941029@gmail.com',
-  'tradewithamithyt@gmail.com',
 ]);
 
 function loadFirebaseWebApiKey(): string {
@@ -29,8 +27,9 @@ function loadFirebaseWebApiKey(): string {
 }
 
 const FIREBASE_WEB_API_KEY = loadFirebaseWebApiKey();
-const VAPID_CACHE_FILE = path.join(__dirname, '.vapid-keys.json');
-const GUEST_SUBS_FILE = path.join(__dirname, '.push-subscriptions.json');
+const LOCAL_RUNTIME_CACHE_DIR = path.join(__dirname, '.firebase');
+const VAPID_CACHE_FILE = path.join(LOCAL_RUNTIME_CACHE_DIR, 'dev-vapid-keys.json');
+const GUEST_SUBS_FILE = path.join(LOCAL_RUNTIME_CACHE_DIR, 'dev-push-subscriptions.json');
 
 interface StoredVapidKeys {
   publicKey: string;
@@ -80,6 +79,7 @@ function getOrCreateLocalVapidKeys(): StoredVapidKeys {
     subject: 'mailto:tradewithamithyt@gmail.com',
   };
   try {
+    fs.mkdirSync(LOCAL_RUNTIME_CACHE_DIR, { recursive: true });
     fs.writeFileSync(VAPID_CACHE_FILE, JSON.stringify(nextKeys, null, 2), 'utf8');
   } catch {
     // Non-fatal on read-only fs
@@ -112,6 +112,7 @@ const serverSubscriptions = loadGuestSubscriptions();
 
 function persistGuestSubscriptions() {
   try {
+    fs.mkdirSync(LOCAL_RUNTIME_CACHE_DIR, { recursive: true });
     const arr = Array.from(serverSubscriptions.values()).slice(-1000);
     fs.writeFileSync(GUEST_SUBS_FILE, JSON.stringify(arr, null, 2), 'utf8');
   } catch {

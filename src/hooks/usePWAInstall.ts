@@ -50,15 +50,15 @@ export function usePWAInstall() {
           .then((existing) => {
             if (!existing) {
               return navigator.serviceWorker
-                .register('./sw.js')
-                .catch(() => navigator.serviceWorker.register('./service-worker.js'));
+                .register('/sw.js', { scope: '/' })
+                .catch(() => navigator.serviceWorker.register('/service-worker.js', { scope: '/' }));
             }
             existing.update().catch(() => {});
             return existing;
           })
           .catch(() => {});
       } else {
-        navigator.serviceWorker.register('/service-worker.js').catch(() => {});
+        navigator.serviceWorker.register('/service-worker.js', { scope: '/' }).catch(() => {});
       }
     }
 

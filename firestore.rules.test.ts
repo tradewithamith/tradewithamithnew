@@ -41,7 +41,7 @@ export const DIRTY_DOZEN_CASES: AdversarialCase[] = [
     name: 'Unverified Bootstrapped Admin Email Spoof',
     collection: '/settings/config',
     operation: 'update',
-    auth: { uid: 'spoof_1', email: 'tradewithamithyt@gmail.com', email_verified: false },
+    auth: { uid: 'spoof_1', email: 'amithmadumal19941029@gmail.com', email_verified: false },
     payload: { winRate: '100%' },
     expectedOutcome: 'PERMISSION_DENIED',
   },

@@ -126,7 +126,6 @@ export const AcademyProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [authReady, setAuthReady] = useState(false);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [vipGrant, setVipGrant] = useState<VipGrant | null>(null);
-  const [isDbAdmin, setIsDbAdmin] = useState(false);
 
   const [settings, setSettings] = useState<AcademySettings>(DEFAULT_SETTINGS);
   const [subscriberCount, setSubscriberCount] = useState<string>(DEFAULT_SETTINGS.subscriberCountFallback);
@@ -167,7 +166,7 @@ export const AcademyProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const isBootstrappedAdmin =
     !!user && user.emailVerified && isBootstrappedAdminEmail(user.email);
 
-  const isAdmin = isBootstrappedAdmin || isDbAdmin;
+  const isAdmin = isBootstrappedAdmin;
 
   const isVipActive = useMemo(() => {
     if (isAdmin) return true;
@@ -204,7 +203,6 @@ export const AcademyProvider: React.FC<{ children: React.ReactNode }> = ({ child
       if (!currentUser) {
         setProfile(null);
         setVipGrant(null);
-        setIsDbAdmin(false);
         setHasPendingVipRequestDb(false);
         setSignalsPrivateMap({});
         setBookAccessMap({});
@@ -522,14 +520,6 @@ export const AcademyProvider: React.FC<{ children: React.ReactNode }> = ({ child
       (error) => handleFirestoreError(error, OperationType.GET, `vipGrants/${user.uid}`)
     );
 
-    const unsubAdmin = onSnapshot(
-      doc(db, 'admins', user.uid),
-      (snap) => {
-        setIsDbAdmin(snap.exists());
-      },
-      () => setIsDbAdmin(false)
-    );
-
     const accessQuery = query(collection(db, 'bookAccess'), where('userId', '==', user.uid));
     const unsubAccess = onSnapshot(
       accessQuery,
@@ -576,7 +566,6 @@ export const AcademyProvider: React.FC<{ children: React.ReactNode }> = ({ child
       unsubProfile();
       unsubMyVipReqs();
       unsubVip();
-      unsubAdmin();
       unsubAccess();
       unsubPersonalNotifs();
     };

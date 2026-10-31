@@ -348,10 +348,11 @@ export async function fetchGoogleSheetRows(params: {
     throw new Error('Provide either a Published Google Sheet URL or a Spreadsheet ID with Google Sign-In.');
   }
 
-  // Try server proxy first to avoid CORS
+  // Try server proxy first to avoid CORS when Express backend is present
   try {
     const proxyRes = await fetch(`/api/sheets/fetch?url=${encodeURIComponent(csvUrl)}`);
-    if (proxyRes.ok) {
+    const contentType = proxyRes.headers.get('content-type') || '';
+    if (proxyRes.ok && contentType.includes('application/json')) {
       const payload = (await proxyRes.json()) as { rows?: Record<string, string>[] };
       if (Array.isArray(payload.rows)) return payload.rows;
     }
@@ -359,19 +360,57 @@ export async function fetchGoogleSheetRows(params: {
     // Fallback to direct fetch on static Firebase Hosting
   }
 
-  const directRes = await fetch(csvUrl);
+  let directTargetUrl = csvUrl;
+  if (csvUrl.includes('docs.google.com/spreadsheets/') && csvUrl.includes('/edit')) {
+    const idMatch = csvUrl.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
+    const gidMatch = csvUrl.match(/gid=([0-9]+)/);
+    if (idMatch?.[1]) {
+      directTargetUrl = `https://docs.google.com/spreadsheets/d/${idMatch[1]}/export?format=csv${
+        gidMatch?.[1] ? `&gid=${gidMatch[1]}` : ''
+      }`;
+    }
+  }
+
+  const directRes = await fetch(directTargetUrl);
   if (!directRes.ok) {
     throw new Error('Could not load published Google Sheet URL.');
   }
   const text = await directRes.text();
+
+  const splitCsvLine = (line: string): string[] => {
+    const out: string[] = [];
+    let cell = '';
+    let quoted = false;
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (c === '"') {
+        if (quoted && line[i + 1] === '"') {
+          cell += '"';
+          i++;
+        } else {
+          quoted = !quoted;
+        }
+      } else if (c === ',' && !quoted) {
+        out.push(cell.trim());
+        cell = '';
+      } else {
+        cell += c;
+      }
+    }
+    out.push(cell.trim());
+    return out;
+  };
+
   const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
   if (lines.length < 2) return [];
-  const headers = lines[0].split(',').map((h) => h.trim().toLowerCase().replace(/[^a-z0-9_]/g, '_'));
+  const headers = splitCsvLine(lines[0]).map((h) =>
+    h.toLowerCase().replace(/[^a-z0-9_]/g, '_')
+  );
   return lines.slice(1).map((line) => {
-    const cols = line.split(',');
+    const cols = splitCsvLine(line);
     const obj: Record<string, string> = {};
     headers.forEach((h, idx) => {
-      if (h) obj[h] = (cols[idx] ?? '').trim().replace(/^"|"$/g, '');
+      if (h) obj[h] = (cols[idx] ?? '').trim();
     });
     return obj;
   });

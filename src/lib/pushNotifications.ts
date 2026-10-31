@@ -63,10 +63,10 @@ async function getReadyServiceWorkerRegistration(): Promise<ServiceWorkerRegistr
     if (!reg) {
       if (import.meta.env.PROD) {
         reg = await navigator.serviceWorker
-          .register('./sw.js')
-          .catch(() => navigator.serviceWorker.register('./service-worker.js'));
+          .register('/sw.js', { scope: '/' })
+          .catch(() => navigator.serviceWorker.register('/service-worker.js', { scope: '/' }));
       } else {
-        reg = await navigator.serviceWorker.register('/service-worker.js');
+        reg = await navigator.serviceWorker.register('/service-worker.js', { scope: '/' });
       }
     }
     const ready = await Promise.race([
@@ -91,10 +91,11 @@ export async function fetchPublicVapidKey(): Promise<string | null> {
     // Fall through to backend API
   }
 
-  // 2. Fallback to backend / Cloudflare env endpoint
+  // 2. Fallback to backend / Cloud Run env endpoint
   try {
     const res = await fetch('/api/push/vapid-public-key');
-    if (res.ok) {
+    const contentType = res.headers.get('content-type') || '';
+    if (res.ok && contentType.includes('application/json')) {
       const json = (await res.json()) as { publicKey?: string };
       if (json.publicKey && json.publicKey.trim().length >= 40) {
         return json.publicKey.trim();
@@ -375,9 +376,9 @@ export async function dispatchAdminWebPush(params: {
         notification: {
           title: params.title,
           body: params.message,
-          icon: './pwa-192x192.png?v=twa3',
-          badge: './pwa-192x192.png?v=twa3',
-          url: params.url || './index.html',
+          icon: '/pwa-192x192.png?v=twa3',
+          badge: '/pwa-192x192.png?v=twa3',
+          url: params.url || '/',
           tag: params.tag || `twa_${Date.now()}`,
         },
       }),

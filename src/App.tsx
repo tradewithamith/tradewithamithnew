@@ -41,6 +41,17 @@ const VALID_WINDOWS: WindowId[] = [
 ];
 
 function detectInitialPage(): StaticPageId {
+  if (typeof window !== 'undefined') {
+    const path = window.location.pathname.toLowerCase().replace(/\/+$/, '');
+    if (path === '/admin' || path.startsWith('/admin/') || path.endsWith('/admin.html')) {
+      return 'admin';
+    }
+    if (path === '/terms' || path.endsWith('/terms.html')) return 'terms';
+    if (path === '/privacy' || path.endsWith('/privacy.html')) return 'privacy';
+    if (path === '/about' || path.endsWith('/about.html')) return 'about';
+    if (path === '/contact' || path.endsWith('/contact.html')) return 'contact';
+  }
+
   if (typeof document !== 'undefined') {
     const rootAttr = document.getElementById('root')?.getAttribute('data-page');
     if (
@@ -55,22 +66,20 @@ function detectInitialPage(): StaticPageId {
     }
   }
 
-  if (typeof window !== 'undefined') {
-    const path = window.location.pathname.toLowerCase();
-    if (path.endsWith('/admin') || path.endsWith('/admin.html')) return 'admin';
-    if (path.endsWith('/terms') || path.endsWith('/terms.html')) return 'terms';
-    if (path.endsWith('/privacy') || path.endsWith('/privacy.html')) return 'privacy';
-    if (path.endsWith('/about') || path.endsWith('/about.html')) return 'about';
-    if (path.endsWith('/contact') || path.endsWith('/contact.html')) return 'contact';
-  }
-
   return 'workspace';
 }
 
 function parseHashWindow(): WindowId | null {
   if (typeof window === 'undefined') return null;
-  const raw = window.location.hash.replace(/^#/, '').trim() as WindowId;
-  return VALID_WINDOWS.includes(raw) ? raw : null;
+  const rawHash = window.location.hash.replace(/^#/, '').trim() as WindowId;
+  if (VALID_WINDOWS.includes(rawHash)) return rawHash;
+
+  const cleanPath = window.location.pathname.toLowerCase().replace(/^\/+|\/+$/g, '');
+  if (cleanPath === 'vip-signals') return 'signals';
+  if (VALID_WINDOWS.includes(cleanPath as WindowId)) {
+    return cleanPath as WindowId;
+  }
+  return null;
 }
 
 function isHashAdmin(): boolean {

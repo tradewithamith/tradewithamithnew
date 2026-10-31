@@ -749,6 +749,46 @@ export const NotificationCenter: React.FC = () => {
 
   const visibleBroadcast = notifications.find((n) => n.active && !dismissedIds[n.id]);
 
+  // Trigger native OS Service Worker notification for fresh alerts when permission is granted
+  useEffect(() => {
+    if (!visibleBroadcast) return;
+    if (typeof window === 'undefined' || !('Notification' in window)) return;
+    if (Notification.permission !== 'granted') return;
+
+    const shownKey = 'msnr_sw_shown_notifs';
+    let shownMap: Record<string, boolean> = {};
+    try {
+      shownMap = JSON.parse(localStorage.getItem(shownKey) || '{}');
+    } catch {
+      shownMap = {};
+    }
+    if (shownMap[visibleBroadcast.id]) return;
+
+    shownMap[visibleBroadcast.id] = true;
+    try {
+      localStorage.setItem(shownKey, JSON.stringify(shownMap));
+    } catch {
+      // Ignore quota
+    }
+
+    // Only pop native OS banner for notifications created within the last 24 hours
+    if (Date.now() - visibleBroadcast.createdAtMs > 24 * 3600_000) return;
+
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.ready
+        .then((reg) =>
+          reg.showNotification(visibleBroadcast.title, {
+            body: visibleBroadcast.message,
+            icon: '/pwa-192x192.png?v=twa3',
+            badge: '/pwa-192x192.png?v=twa3',
+            tag: visibleBroadcast.id,
+            data: { url: visibleBroadcast.buttonUrl || '/' },
+          })
+        )
+        .catch(() => {});
+    }
+  }, [visibleBroadcast]);
+
   if (!showOnboarding && !visibleBroadcast) return null;
 
   return (

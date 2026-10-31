@@ -3,6 +3,11 @@ build/
 dist/
 coverage/
 .firebase/
+.vapid-keys.json
+.push-subscriptions.json
+firebase-debug.log*
+firestore-debug.log*
+ui-debug.log*
 .DS_Store
 *.log
 .env*

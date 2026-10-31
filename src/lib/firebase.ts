@@ -28,11 +28,9 @@ export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const auth = getAuth(app);
 export const storage = getStorage(app);
 
-export const BOOTSTRAPPED_ADMIN_EMAIL = 'tradewithamithyt@gmail.com';
+export const BOOTSTRAPPED_ADMIN_EMAIL = 'amithmadumal19941029@gmail.com';
 export const BOOTSTRAPPED_ADMIN_EMAILS = [
-  'emoneywithamith@gmail.com',
   'amithmadumal19941029@gmail.com',
-  'tradewithamithyt@gmail.com',
 ] as const;
 
 export function isBootstrappedAdminEmail(email?: string | null): boolean {
@@ -269,7 +267,7 @@ export function parseFirebaseAuthError(error: unknown): ParsedAuthError {
   const hostname =
     typeof window !== 'undefined' && window.location.hostname
       ? window.location.hostname
-      : 'your-domain.github.io';
+      : `${firebaseConfig.projectId}.web.app`;
 
   const rawCode =
     error && typeof error === 'object' && 'code' in error && typeof (error as { code?: unknown }).code === 'string'

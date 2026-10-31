@@ -368,185 +368,278 @@ export const SignalsWindow: React.FC<SignalsWindowProps> = ({ onOpenVipJoin }) =
         </div>
       </div>
 
-      {/* Interactive Segmented Control: Active Signals vs 7-Day Signal History */}
-      <div className="flex items-center justify-between gap-4 flex-wrap">
-        <div className="inline-flex items-center p-1 rounded-xl bg-white/[0.05] border border-white/[0.08]">
-          <button
-            type="button"
-            onClick={() => setTab('active')}
-            className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap ${
-              tab === 'active'
-                ? 'bg-[#D4AF37] text-[#09090B]'
-                : 'text-[#A1A1AA] hover:text-[#F5F5F7]'
-            }`}
+      {/* Entire Signals Section — Completely Blurred & Locked for Non-VIP Users */}
+      {!isVipActive ? (
+        <div className="relative rounded-2xl overflow-hidden border border-white/[0.08] bg-[#0B0C10]/60">
+          {/* Redacted & Heavily Blurred Placeholder Background (Zero Real Signal Data in DOM) */}
+          <div
+            aria-hidden="true"
+            className="p-5 sm:p-6 space-y-6 blur-lg select-none pointer-events-none opacity-35"
           >
-            Active Signals ({activeSignals.length})
-          </button>
-          <button
-            type="button"
-            onClick={() => setTab('history')}
-            className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap ${
-              tab === 'history'
-                ? 'bg-[#D4AF37] text-[#09090B]'
-                : 'text-[#A1A1AA] hover:text-[#F5F5F7]'
-            }`}
-          >
-            7-Day Signal History ({historySignals.length})
-          </button>
-        </div>
-      </div>
+            <div className="inline-flex items-center p-1 rounded-xl bg-white/[0.05] border border-white/[0.08]">
+              <span className="px-4 py-1.5 rounded-lg text-xs font-semibold bg-[#D4AF37] text-[#09090B]">
+                Active Signals (•)
+              </span>
+              <span className="px-4 py-1.5 rounded-lg text-xs font-semibold text-[#A1A1AA]">
+                7-Day Signal History (•)
+              </span>
+            </div>
 
-      {/* Signal List / History Table */}
-      {tab === 'active' ? (
-        activeSignals.length === 0 ? (
-          <div className="apple-surface rounded-2xl p-10 text-center space-y-2">
-            <p className="text-base font-medium text-[#F5F5F7]">No Active Signals Right Now</p>
-            <p className="text-sm text-[#A1A1AA]">
-              Waiting for price to reach an unmitigated H4 or Daily XAUUSD MSNR roadblock.
-            </p>
+            <div className="grid grid-cols-1 gap-4">
+              {[1, 2].map((idx) => (
+                <div
+                  key={idx}
+                  className="apple-surface rounded-2xl p-6 flex flex-col justify-between gap-5"
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2 text-xs text-[#A1A1AA] font-mono">
+                        <span>••••-••-••</span>
+                        <span>·</span>
+                        <span>•••••</span>
+                        <span>·</span>
+                        <span>••••••</span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className="text-xl font-semibold text-[#F5F5F7]">••••••</span>
+                        <span className="text-sm font-semibold text-[#30D158]">••••</span>
+                      </div>
+                    </div>
+                    <span className="text-xs sm:text-sm font-mono font-semibold text-[#E5C76B]">
+                      Target +••• PIPS
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 font-mono text-sm">
+                    <div className="p-3 rounded-xl bg-white/[0.03] border border-white/[0.06]">
+                      <p className="text-[11px] font-sans text-[#8E8E93]">Entry Price</p>
+                      <p className="mt-1 font-semibold text-[#F5F5F7]">█████</p>
+                    </div>
+                    <div className="p-3 rounded-xl bg-white/[0.03] border border-white/[0.06]">
+                      <p className="text-[11px] font-sans text-[#8E8E93]">TP</p>
+                      <p className="mt-1 font-semibold text-[#30D158]">█████</p>
+                    </div>
+                    <div className="p-3 rounded-xl bg-white/[0.03] border border-white/[0.06]">
+                      <p className="text-[11px] font-sans text-[#8E8E93]">Extra TP</p>
+                      <p className="mt-1 font-semibold text-[#E5C76B]">█████</p>
+                    </div>
+                    <div className="p-3 rounded-xl bg-white/[0.03] border border-white/[0.06]">
+                      <p className="text-[11px] font-sans text-[#8E8E93]">SL</p>
+                      <p className="mt-1 font-semibold text-[#FF453A]">█████</p>
+                    </div>
+                  </div>
+
+                  <div className="text-xs text-[#A1A1AA]">
+                    <span className="text-[#D1D1D6] font-medium">Note: </span>
+                    ████████████████████████████████████████████████████
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
-        ) : (
-          <div className="grid grid-cols-1 gap-4">{activeSignals.map(renderSignalCard)}</div>
-        )
-      ) : historySignals.length === 0 ? (
-        <div className="apple-surface rounded-2xl p-10 text-center space-y-2">
-          <p className="text-base font-medium text-[#F5F5F7]">No Completed Signals in Last 7 Days</p>
-          <p className="text-sm text-[#A1A1AA]">
-            Completed TP HIT, SL HIT, and CLOSED signals from the past 7 days appear here automatically.
-          </p>
-        </div>
-      ) : (
-        <div className="space-y-4">
-          {/* Desktop Structured History Table + Mobile Cards */}
-          <div className="hidden md:block apple-surface rounded-2xl overflow-hidden">
-            <table className="w-full text-left border-collapse text-sm">
-              <thead>
-                <tr className="border-b border-white/[0.08] text-xs text-[#A1A1AA]">
-                  <th className="py-3.5 px-5 font-medium">Date</th>
-                  <th className="py-3.5 px-4 font-medium">Instrument</th>
-                  <th className="py-3.5 px-4 font-medium">Direction</th>
-                  <th className="py-3.5 px-4 font-medium text-right">Entry</th>
-                  <th className="py-3.5 px-4 font-medium text-right">TP</th>
-                  <th className="py-3.5 px-4 font-medium text-right">SL</th>
-                  <th className="py-3.5 px-4 font-medium">Result</th>
-                  <th className="py-3.5 px-5 font-medium text-right">Pips</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-white/[0.06] font-mono tabular-nums">
-                {historySignals.map((sig) => {
-                  const unlocked =
-                    isVipActive && sig.entry !== undefined && sig.direction !== 'LOCKED';
-                  return (
-                    <tr key={sig.id} className="hover:bg-white/[0.02] transition-colors">
-                      <td className="py-3.5 px-5 text-xs text-[#D1D1D6]">
-                        {unlocked ? (
-                          sig.date
-                        ) : (
-                          <span className="blur-sm select-none pointer-events-none">••••-••-••</span>
-                        )}
-                      </td>
-                      <td className="py-3.5 px-4 font-sans font-semibold text-[#F5F5F7]">
-                        {unlocked ? (
-                          sig.currency
-                        ) : (
-                          <span className="blur-sm select-none pointer-events-none">••••••</span>
-                        )}
-                      </td>
-                      <td
-                        className={`py-3.5 px-4 font-sans font-semibold ${
-                          !unlocked
-                            ? 'text-[#A1A1AA]'
-                            : sig.direction === 'BUY'
-                            ? 'text-[#30D158]'
-                            : 'text-[#FF453A]'
-                        }`}
-                      >
-                        {unlocked ? (
-                          sig.direction
-                        ) : (
-                          <span className="blur-sm select-none pointer-events-none">••••</span>
-                        )}
-                      </td>
-                      <td className="py-3.5 px-4 text-right text-[#F5F5F7]">
-                        {unlocked ? (
-                          sig.entry
-                        ) : (
-                          <span className="blur-sm select-none pointer-events-none">•••••</span>
-                        )}
-                      </td>
-                      <td className="py-3.5 px-4 text-right text-[#30D158]">
-                        {unlocked ? (
-                          sig.tp
-                        ) : (
-                          <span className="blur-sm select-none pointer-events-none">•••••</span>
-                        )}
-                      </td>
-                      <td className="py-3.5 px-4 text-right text-[#FF453A]">
-                        {unlocked ? (
-                          sig.sl
-                        ) : (
-                          <span className="blur-sm select-none pointer-events-none">•••••</span>
-                        )}
-                      </td>
-                      <td
-                        className={`py-3.5 px-4 font-sans text-xs font-semibold ${
-                          !unlocked
-                            ? 'text-[#A1A1AA]'
-                            : sig.result === 'TP HIT'
-                            ? 'text-[#30D158]'
-                            : sig.result === 'SL HIT'
-                            ? 'text-[#FF453A]'
-                            : 'text-[#D1D1D6]'
-                        }`}
-                      >
-                        {unlocked ? (
-                          sig.result
-                        ) : (
-                          <span className="blur-sm select-none pointer-events-none">••••••</span>
-                        )}
-                      </td>
-                      <td
-                        className={`py-3.5 px-5 text-right font-semibold ${
-                          !unlocked
-                            ? 'text-[#A1A1AA]'
-                            : sig.displayPips >= 0
-                            ? 'text-[#30D158]'
-                            : 'text-[#FF453A]'
-                        }`}
-                      >
-                        {unlocked ? (
-                          formatSignedPips(sig.displayPips)
-                        ) : (
-                          <span className="blur-sm select-none pointer-events-none">•••• PIPS</span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-            {!isVipActive && (
-              <div className="px-5 py-3.5 border-t border-white/[0.08] flex items-center justify-between gap-4 bg-white/[0.02]">
-                <span className="text-xs text-[#A1A1AA]">
+
+          {/* Full-Section Frosted Glass VIP Lock Overlay */}
+          <div className="absolute inset-0 z-10 backdrop-blur-md bg-[#070709]/65 flex items-center justify-center p-6">
+            <div className="max-w-md w-full apple-surface rounded-2xl p-6 sm:p-8 text-center space-y-4 border border-[#D4AF37]/30 shadow-2xl">
+              <div className="w-12 h-12 rounded-2xl bg-[#D4AF37]/15 border border-[#D4AF37]/35 flex items-center justify-center mx-auto">
+                <Lock className="w-5 h-5 text-[#D4AF37]" />
+              </div>
+              <div className="space-y-1.5">
+                <p className="text-xs font-semibold tracking-wider text-[#D4AF37]">
                   {hasPendingVipRequest
-                    ? 'Your access request is awaiting manual Admin approval. All signal details remain blurred until verified.'
-                    : 'All signal details are blurred until your access request is verified and approved by Admin.'}
-                </span>
+                    ? 'APPROVAL PENDING · SIGNALS LOCKED'
+                    : 'VIP ACCESS REQUIRED'}
+                </p>
+                <h3 className="text-lg sm:text-xl font-semibold text-[#F5F5F7]">
+                  {hasPendingVipRequest
+                    ? 'Your VIP Request Is Awaiting Approval'
+                    : 'Unlock Full XAUUSD VIP Signals'}
+                </h3>
+                <p className="text-xs sm:text-sm text-[#A1A1AA] leading-relaxed">
+                  {hasPendingVipRequest
+                    ? 'All active signals, 7-day signal history, Entry, TP, Extra TP, SL, and confirmation notes remain blurred until your VIP request is manually verified and approved.'
+                    : 'Active signals and 7-day execution history are exclusive to approved VIP members. Join VIP to unlock full real-time XAUUSD setups.'}
+                </p>
+              </div>
+              <div className="pt-1">
                 <button
                   type="button"
                   onClick={onOpenVipJoin}
-                  className="px-3.5 py-1.5 rounded-lg bg-[#D4AF37] text-[#09090B] text-xs font-semibold hover:bg-[#E5C76B] transition-colors whitespace-nowrap"
+                  className="px-6 py-2.5 rounded-xl bg-[#D4AF37] text-[#09090B] text-xs sm:text-sm font-semibold hover:bg-[#E5C76B] transition-colors"
                 >
-                  {hasPendingVipRequest ? 'REQUEST PENDING' : 'JOIN VIP'}
+                  {hasPendingVipRequest ? 'VIEW PENDING REQUEST' : 'JOIN VIP ACCESS'}
                 </button>
               </div>
-            )}
-          </div>
-
-          <div className="md:hidden grid grid-cols-1 gap-4">
-            {historySignals.map(renderSignalCard)}
+            </div>
           </div>
         </div>
+      ) : (
+        <>
+          {/* Interactive Segmented Control: Active Signals vs 7-Day Signal History */}
+          <div className="flex items-center justify-between gap-4 flex-wrap">
+            <div className="inline-flex items-center p-1 rounded-xl bg-white/[0.05] border border-white/[0.08]">
+              <button
+                type="button"
+                onClick={() => setTab('active')}
+                className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap ${
+                  tab === 'active'
+                    ? 'bg-[#D4AF37] text-[#09090B]'
+                    : 'text-[#A1A1AA] hover:text-[#F5F5F7]'
+                }`}
+              >
+                Active Signals ({activeSignals.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setTab('history')}
+                className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap ${
+                  tab === 'history'
+                    ? 'bg-[#D4AF37] text-[#09090B]'
+                    : 'text-[#A1A1AA] hover:text-[#F5F5F7]'
+                }`}
+              >
+                7-Day Signal History ({historySignals.length})
+              </button>
+            </div>
+          </div>
+
+          {/* Signal List / History Table */}
+          {tab === 'active' ? (
+            activeSignals.length === 0 ? (
+              <div className="apple-surface rounded-2xl p-10 text-center space-y-2">
+                <p className="text-base font-medium text-[#F5F5F7]">No Active Signals Right Now</p>
+                <p className="text-sm text-[#A1A1AA]">
+                  Waiting for price to reach an unmitigated H4 or Daily XAUUSD MSNR roadblock.
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-4">{activeSignals.map(renderSignalCard)}</div>
+            )
+          ) : historySignals.length === 0 ? (
+            <div className="apple-surface rounded-2xl p-10 text-center space-y-2">
+              <p className="text-base font-medium text-[#F5F5F7]">No Completed Signals in Last 7 Days</p>
+              <p className="text-sm text-[#A1A1AA]">
+                Completed TP HIT, SL HIT, and CLOSED signals from the past 7 days appear here automatically.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {/* Desktop Structured History Table + Mobile Cards */}
+              <div className="hidden md:block apple-surface rounded-2xl overflow-hidden">
+                <table className="w-full text-left border-collapse text-sm">
+                  <thead>
+                    <tr className="border-b border-white/[0.08] text-xs text-[#A1A1AA]">
+                      <th className="py-3.5 px-5 font-medium">Date</th>
+                      <th className="py-3.5 px-4 font-medium">Instrument</th>
+                      <th className="py-3.5 px-4 font-medium">Direction</th>
+                      <th className="py-3.5 px-4 font-medium text-right">Entry</th>
+                      <th className="py-3.5 px-4 font-medium text-right">TP</th>
+                      <th className="py-3.5 px-4 font-medium text-right">SL</th>
+                      <th className="py-3.5 px-4 font-medium">Result</th>
+                      <th className="py-3.5 px-5 font-medium text-right">Pips</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/[0.06] font-mono tabular-nums">
+                    {historySignals.map((sig) => {
+                      const unlocked =
+                        isVipActive && sig.entry !== undefined && sig.direction !== 'LOCKED';
+                      return (
+                        <tr key={sig.id} className="hover:bg-white/[0.02] transition-colors">
+                          <td className="py-3.5 px-5 text-xs text-[#D1D1D6]">
+                            {unlocked ? (
+                              sig.date
+                            ) : (
+                              <span className="blur-sm select-none pointer-events-none">••••-••-••</span>
+                            )}
+                          </td>
+                          <td className="py-3.5 px-4 font-sans font-semibold text-[#F5F5F7]">
+                            {unlocked ? (
+                              sig.currency
+                            ) : (
+                              <span className="blur-sm select-none pointer-events-none">••••••</span>
+                            )}
+                          </td>
+                          <td
+                            className={`py-3.5 px-4 font-sans font-semibold ${
+                              !unlocked
+                                ? 'text-[#A1A1AA]'
+                                : sig.direction === 'BUY'
+                                ? 'text-[#30D158]'
+                                : 'text-[#FF453A]'
+                            }`}
+                          >
+                            {unlocked ? (
+                              sig.direction
+                            ) : (
+                              <span className="blur-sm select-none pointer-events-none">••••</span>
+                            )}
+                          </td>
+                          <td className="py-3.5 px-4 text-right text-[#F5F5F7]">
+                            {unlocked ? (
+                              sig.entry
+                            ) : (
+                              <span className="blur-sm select-none pointer-events-none">•••••</span>
+                            )}
+                          </td>
+                          <td className="py-3.5 px-4 text-right text-[#30D158]">
+                            {unlocked ? (
+                              sig.tp
+                            ) : (
+                              <span className="blur-sm select-none pointer-events-none">•••••</span>
+                            )}
+                          </td>
+                          <td className="py-3.5 px-4 text-right text-[#FF453A]">
+                            {unlocked ? (
+                              sig.sl
+                            ) : (
+                              <span className="blur-sm select-none pointer-events-none">•••••</span>
+                            )}
+                          </td>
+                          <td
+                            className={`py-3.5 px-4 font-sans text-xs font-semibold ${
+                              !unlocked
+                                ? 'text-[#A1A1AA]'
+                                : sig.result === 'TP HIT'
+                                ? 'text-[#30D158]'
+                                : sig.result === 'SL HIT'
+                                ? 'text-[#FF453A]'
+                                : 'text-[#D1D1D6]'
+                            }`}
+                          >
+                            {unlocked ? (
+                              sig.result
+                            ) : (
+                              <span className="blur-sm select-none pointer-events-none">••••••</span>
+                            )}
+                          </td>
+                          <td
+                            className={`py-3.5 px-5 text-right font-semibold ${
+                              !unlocked
+                                ? 'text-[#A1A1AA]'
+                                : sig.displayPips >= 0
+                                ? 'text-[#30D158]'
+                                : 'text-[#FF453A]'
+                            }`}
+                          >
+                            {unlocked ? (
+                              formatSignedPips(sig.displayPips)
+                            ) : (
+                              <span className="blur-sm select-none pointer-events-none">•••• PIPS</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="md:hidden grid grid-cols-1 gap-4">
+                {historySignals.map(renderSignalCard)}
+              </div>
+            </div>
+          )}
+        </>
       )}
     </div>
   );

@@ -3,9 +3,9 @@ self.addEventListener('push', (event) => {
   let payload = {
     title: 'Trade With Amith',
     body: 'New XAUUSD update available in your terminal.',
-    icon: './pwa-192x192.png?v=twa3',
-    badge: './pwa-192x192.png?v=twa3',
-    url: './index.html',
+    icon: '/pwa-192x192.png?v=twa3',
+    badge: '/pwa-192x192.png?v=twa3',
+    url: '/',
     tag: 'twa-alert',
   };
 
@@ -38,7 +38,7 @@ self.addEventListener('push', (event) => {
     renotify: true,
     vibrate: [180, 80, 180],
     data: {
-      url: payload.url || './index.html',
+      url: payload.url || '/',
     },
   };
 
@@ -47,7 +47,7 @@ self.addEventListener('push', (event) => {
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const rawUrl = (event.notification.data && event.notification.data.url) || './index.html';
+  const rawUrl = (event.notification.data && event.notification.data.url) || '/';
   const targetUrl = new URL(rawUrl, self.location.origin).href;
 
   event.waitUntil(

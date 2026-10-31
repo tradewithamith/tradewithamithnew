@@ -1372,7 +1372,7 @@ export const AdminDashboard: React.FC<{ onExitAdmin?: () => void }> = ({ onExitA
               {(authError.isUnauthorizedDomain || authError.isUserCancelled) && (
                 <div className="rounded-xl bg-black/45 border border-white/10 p-3 space-y-2.5">
                   <p className="text-[11px] font-medium text-[#E5C76B]">
-                    One-Time Fix if Popup Closes Immediately on GitHub Pages / Custom Domain:
+                    One-Time Fix if Popup Closes Immediately on a Custom Domain:
                   </p>
                   <div className="flex items-center justify-between gap-2 rounded-lg bg-white/[0.04] border border-white/10 px-3 py-2">
                     <code className="text-xs font-mono text-[#F5F5F7] truncate">
